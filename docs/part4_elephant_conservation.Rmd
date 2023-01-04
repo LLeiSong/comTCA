@@ -1,0 +1,16 @@
+---
+title: 'Part4: elephant conservation analysis'
+author: "Lei Song"
+date: "1/4/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This document covers the analysis of elephant conservation.
+
+## Methodology

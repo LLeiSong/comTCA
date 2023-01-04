@@ -1,0 +1,16 @@
+---
+title: 'Part5: optimizing multi-objectives'
+author: "Lei Song"
+date: "1/4/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This document covers the reconciling analysis to optimize land allocation between agriculture and elephant conservation and minimize biodiversity and carbon loss.
+
+## Methodology

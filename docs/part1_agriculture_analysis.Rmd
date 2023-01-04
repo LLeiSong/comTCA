@@ -1,0 +1,27 @@
+---
+title: 'Part1: agriculture analysis'
+author: "Lei Song"
+date: "1/4/2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+This document covers the analysis of agriculture:
+
+- Current crop production at current farmland
+- Crop production gap at current farmland
+- Farming potential at available areas for possible expansion.
+
+The main methods are:
+
+- Run DSSAT using different management strategies for simulation
+- Run statistical model to predict gridded crop production and gaps.
+
+## Methodology
+
+

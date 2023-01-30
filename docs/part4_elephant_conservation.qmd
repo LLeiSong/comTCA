@@ -1,0 +1,22 @@
+---
+title: "Part4: Elephant conservation analysis"
+author: "Lei Song"
+editor: visual
+toc: true
+toc-depth: 2
+number-sections: false
+toc-location: left
+output: 
+  html:
+      theme: journal
+bibliography: references.bib
+---
+
+## Introduction
+
+This part works together with biodiversity cost analysis to evaluate conservation. We separated elephant conservation from biodiversity to highlight the importance of this keystone species. The analysis includes two parts:
+
+- Environmental suitability
+- Landscape connectivity
+
+

@@ -7,6 +7,28 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+
+# Load packages
+library(sf)
+library(here)
+library(dplyr)
+library(terra)
+library(stringr)
+library(purrr)
+library(rcropmod)
+library(Dasst)
+select <- dplyr::select
+
+# Set paths
+dssat_data_dir <- "/Users/pinot/Dropbox/dssat48"
+dssat_exe <- file.path(dssat_data_dir, "dscsm048")
+soil_dir <- file.path(dssat_data_dir, "Soil")
+weather_dir <- file.path(dssat_data_dir, "Weather")
+geno_dir <- file.path(dssat_data_dir, "Genotype")
+agro_dir <- file.path(here("data/agriculture"))
+
+result_dir <- here("results")
+agro_result <- file.path(result_dir, "agriculture")
 ```
 
 ## Introduction
@@ -17,11 +39,338 @@ This document covers the analysis of agriculture:
 - Crop production gap at current farmland
 - Farming potential at available areas for possible expansion.
 
+We focus on two staple crops: Maize and Paddy.
+
 The main methods are:
 
-- Run DSSAT using different management strategies for simulation
+- Run DSSAT using different management strategies for simulation based on the reality in Tanzania.
 - Run statistical model to predict gridded crop production and gaps.
 
-## Methodology
+## Soil classification
 
+The weather station data is not sufficient to run DSSAT, we won't use it for our simulation, so we don't have to stick with †he stations. Thus, we regularly sampled points across the whole country to run the model. The soil classification map will be used to collect samples for DSSAT yield estimation. We queried the map from SoilGrids website (https://soilgrids.org) hosted by ISRIC.
+
+```{r}
+bry <- read_sf(here("data/geoms/mainland_tanzania.geojson")) %>% 
+    select()
+
+coords <- st_bbox(bry)
+coords <- sprintf("long(%s,%s)&SUBSET=lat(%s,%s)", 
+                  coords[1] - 0.2, coords[3] + 0.2,
+                  coords[2] - 0.2, coords[4] + 0.2)
+
+url <- sprintf("https://maps.isric.org/mapserv?map=/map/wrb.map&SERVICE=WCS&VERSION=2.0.1&REQUEST=GetCoverage&COVERAGEID=MostProbable&FORMAT=image/tiff&SUBSET=%s&SUBSETTINGCRS=http://www.opengis.net/def/crs/EPSG/0/4326&OUTPUTCRS=http://www.opengis.net/def/crs/EPSG/0/4326", coords)
+
+download.file(url = url, destfile = here("data/soil/WRD_soil_class.tif"))
+```
+
+## Prepare samples for simulation
+
+We randomly sampled points for each soil type within each district to run DSSAT simulation. We only used the cropland area (with a reference of year 2018).
+
+```{r}
+# Read districts
+tz_l1 <- read_sf(here("data/geoms/tanzania_level1.geojson")) %>% 
+    mutate(id = as.integer(gsub("TZ", "", ADM1_PCODE))) %>% 
+    select(id) %>% 
+    st_make_valid()
+
+# Read Cropland
+crop_mask <- rast(here("data/agriculture/landcover_1km.tif"))
+crop_mask[crop_mask != 1] <- NA
+
+# Subset soil layer
+soil_class <- rast(here("data/soil/WRD_soil_class.tif"))
+tz_l1 <- rasterize(vect(tz_l1), soil_class, field = "id")
+crop_mask <- project(crop_mask, soil_class, method = "near")
+crop_mask <- resample(crop_mask, soil_class, method = "near")
+
+soil_class <- c(soil_class, tz_l1) %>% 
+    mask(crop_mask) %>% 
+    mask(vect(bry))
+
+# Sample the points
+## First, summarize the maps
+soil_df <- values(soil_class) %>% na.omit() %>% 
+    data.frame() %>% 
+    rename(district = id,
+           soil_type = WRD_soil_class)
+soil_type_l1 <- soil_df %>% 
+    group_by(district) %>% 
+    summarise(n = length(unique(soil_type)))
+
+soil_pts <- read_sf(
+    file.path("data/soil/han",
+              "point5m_soilgrids-for-dssat-10km_v1.shp")) %>% 
+    st_intersection(bry)
+
+soil_classes <- extract(soil_class, soil_pts)
+soil_pts <- soil_pts %>% 
+    mutate(soil_class = soil_classes$WRD_soil_class,
+           adm1_pcode = soil_classes$id) %>% na.omit()
+soil_pts <- soil_pts %>% st_drop_geometry() %>% 
+    select(adm1_pcode, soil_class, SoilProfil, X, Y)
+
+set.seed(1234)
+samples <- soil_pts %>% 
+    group_by(adm1_pcode, soil_class) %>% 
+    sample_n(size = 1) %>% 
+    rename(lat = Y, lon = X) %>% 
+    ungroup() %>% 
+    mutate(id = 1:nrow(.),
+           WeatherProfil = paste0("TZA", 1:nrow(.) + 10000),
+           adm1_pcode = paste0("TZ", str_pad(adm1_pcode, 2, pad = "0"))) %>% 
+    select(id, adm1_pcode, WeatherProfil, SoilProfil, lat, lon)
+write.csv(samples, here("data/geoms/dssat_samples.csv"), row.names = FALSE)
+```
+
+## Weather dataset
+
+We queried meteorological and solar data from NASA POWER and CHIRPS. First, we made the input file using the selected samples, and then queried the data using python scripts shared by [NASAP_CHIRPS_WTH](https://github.com/DSSAT/NASAP_CHIRPS_WTH).
+
+```{r}
+stations_nasa <- samples %>% 
+    select(id, SoilProfil, lat, lon) %>% 
+    rename(nasapid = id, 
+           Latitude = lat, Longitude = lon) %>% 
+    mutate(ID = nasapid, LatNP = Latitude, LonNP = Longitude) %>% 
+    select(ID, Latitude, Longitude, nasapid, LatNP, LonNP)
+write.csv(stations_nasa, here("data/weather/nasap_query.csv"), 
+          row.names = FALSE)
+```
+
+Then within terminal
+
+```
+python NASAP_CHIRPS_WTH get /path/to/nasap_query.csv 20110101 20201231 /path/to/comTCA/data/weather/wth
+```
+
+```{r}
+# Rename the files to fit with DSSAT tradition
+# Because NASAP_CHIRPS_WTH only takes numeric index
+walk(list.files(here("data/weather/wth")), function(fname){
+    new_fname <- paste0(
+        "TZA", as.integer(tools::file_path_sans_ext(fname)) + 10000, ".WTH")
+    file.rename(file.path(here("data/weather/wth"), fname), 
+                file.path(here("data/weather/wth"), new_fname))
+})
+```
+
+In terminal: `cp -R /path/to/comTCA/data/weather/wth/* weather_dir` to copy weather files into DSSAT Data directory.
+
+## Soil dataset
+
+We queried SoilGrid 10km properties made by [Han et al.](https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/1PEEY0) to be the soil used by DSSAT. We copied the TZ.SOL to DSSAT working directory, and the soil-weather grid index catalog is `data/geoms/dssat_samples.csv`.
+
+```{r}
+# Back-up existing file
+file.rename(file.path(soil_dir, "SOIL.SOL"), 
+            file.path(soil_dir, "SOIL.BAK"))
+
+# Copy new one over
+file.copy(file.path("data/soil/han", "TZ.SOL"),
+          file.path(soil_dir, "SOIL.SOL"))
+```
+
+## Crop calendar
+
+For Tanzania, agricultural calendar starts from 1st October and ends on the 30th September of the subsequent year. Crop calendar was queried from [here](http://riskprofilesundrr.org/documents/1658).
+
+**Maize**
+
+- Long season: planting in Mar, and harvest in Jun to Sep.
+- Short season: planting in Oct to Dec, and harvest in Dec to Feb.
+
+**Rice**
+
+Planting in Nov to Jan, and harvest in May to Jul.
+
+## Run experiments
+### Maize
+#### Baseline (current yield)
+
+District-level yield, seed usage, fertilizer usage, and planting dates are used to calibrate the model. The result is used as the baseline for maize production (current yield). Cultivation of maize is conducted in two different rainfall seasons of the year ([USDA](https://ipad.fas.usda.gov/rssiws/al/crop_calendar/safrica.aspx)):
+
+- Bimodal (Vuli) October to December. This is the short rainy season.
+- Unimodal (Msumi) March to May. This is the long rainy season.
+
+under different nitrogen levels (0, 15, 30 and 60 kg N/ha) and rain-fed conditions. For the 15/30 kg N/ha treatment, DAP fertilizer was applied once after crop establishment, 28 days after sowing (DAS) whereas for the 60 Kg N/ha treatment, N fertilizer was applied in two rounds, the first one during planting to supply 30 Kg N/ha (as DAP) and the second round at 45 DAS as Urea, to supply the remaining 30 kg N/ha.
+
+```{r}
+districts <- read_sf(here("data/geoms/tanzania_level1.geojson")) %>% 
+    mutate(Region = ifelse(
+        ADM1_EN == "Dar-es-salaam", 
+        "Dar Es Salaam", ADM1_EN),
+        adm1_pcode = ADM1_PCODE) %>% 
+    select(Region, adm1_pcode)
+
+# See usage
+source("scripts/query_seed_usage.R")
+src_dir <- file.path(
+    "data/agriculture/NSCA",
+    "Small_Scale_Farmers_Dataset_ACQI")
+seed_usage <- do.call(
+    rbind, lapply(c("long", "short"), function(season){
+        do.call(rbind, lapply(c("maize", "paddy"), function(crop){
+            query_seed_usage(src_dir, season, crop)}))}))
+
+# Irrigation usage
+source("scripts/query_management.R")
+irrigation_usage <- do.call(
+    rbind, lapply(c("long", "short"), function(season){
+        do.call(rbind, lapply(c("maize", "paddy"), function(crop){
+            query_management(src_dir, season, crop, "irrigation")}))}))
+
+# Fertilizer usage
+fertilizer_usage <- do.call(
+    rbind, lapply(c("long", "short"), function(season){
+        do.call(rbind, lapply(c("maize", "paddy"), function(crop){
+            query_management(src_dir, season, crop, "fertilizer")}))}))
+
+# Burn to spatial data, take short-season maize as an example
+short_maize <- seed_usage %>% 
+    filter(Season == "short" & Crop == "maize") %>% 
+    merge(districts, ., by = "Region")
+write_sf(short_maize, "data/agriculture/short_maize.geojson")
+```
+
+Based on the surveys, we could tell that planting date, fertilizer usage, and probably planting management (plant density and row spacing) could be different across different districts. So we first tune these parameters using common maize cultivars in Tanzania.
+
+##### Cultivar
+
+Prepare cultivars and parameters for calibration with year 2019 - 2020:
+
+```{r}
+library(DSSAT)
+source(here("scripts/read_write_cultivar.R"))
+
+# Make the cultivar file
+cul <- dssat_read_cultigen(file.path(geno_dir, "MZCER048.CUL"))
+# cul <- cul[1:5, ]
+# cul$`@VAR#` <- paste0("TZ", str_pad(1:5, 4, pad = "0"))
+# cul$VRNAME.......... <- c("CM1509(LL)", "H614(LI)",  "CM1510(SL)", 
+#                           "TMV1(SI)", "Staha(SI)")
+# cul$`ECO#` <- rep("IB0001", 5)
+# cul$P1 <- c(238.6, 290.8, 125, 215, 230.5)
+# cul$P2 <- c(0.5, 0.471, 0.5, 0.5, 0.5)
+# cul$P5 <- c(654, 921.2, 560, 635, 735)
+# cul$G2 <- c(450, 796.8, 450, 650, 700)
+# cul$G3 <- c(8.5, 5.26, 9.5, 7.55, 8.8)
+# cul$PHINT <- c(75, 39.74, 75, 38, 47.3)
+cul <- cul[1:2, ]
+cul$`@VAR#` <- paste0("TZ", str_pad(1:2, 4, pad = "0"))
+cul$VRNAME.......... <- c("SS1", "SS2")
+cul$`ECO#` <- rep("IB0001", 2)
+cul$P1 <- c(110, 125)
+cul$P2 <- c(0.3, 0.5)
+cul$P5 <- c(680, 560)
+cul$G2 <- c(820, 450)
+cul$G3 <- c(6.6, 9.5)
+cul$PHINT <- c(38.9, 38.9)
+dssatr_write_cultigen(
+    cul, file.name = "MZCER048.CUL",
+    dssat_path = dssat_data_dir,
+    output_dir = here("data/agriculture"))
+
+# Back-up existing file
+file.rename(file.path(geno_dir, "MZCER048.CUL"), 
+            file.path(geno_dir, "MZCER048.BAK2"))
+
+# Copy new one over
+file.copy(here("data/agriculture/MZCER048.CUL"),
+          file.path(geno_dir, "MZCER048.CUL"))
+```
+
+##### Short season
+
+```{r}
+# Load scripts
+source(here("scripts/read_sol_hor.R"))
+source(here("scripts/run_dssat_perm.R"))
+
+# Planting relevant
+plant_density <- 3
+row_spacing <- seq(75, 90, 5)
+N_kg <- c(0, 10, 40, 80, 100)
+
+# Short season
+## Planting dates
+planting_dates <- seq(19274, 19365, by = 15) # Oct to Dec
+
+parameters <- expand.grid(
+    start_year = 2019, 
+    end_year = 2019, 
+    planting_date = planting_dates, 
+    plant_density = plant_density, 
+    row_spacing = row_spacing, 
+    N_kg = N_kg) %>% 
+    mutate(id_param = 1:nrow(.))
+
+cultivars <- cul$`@VAR#`
+
+## Set a new class for the result       
+yields <- do.call(rbind, lapply(1:nrow(samples), function(m) {
+    x <- samples[m, ]
+    do.call(rbind, lapply(1:nrow(parameters), function(n) {
+        y <- parameters[n, ]
+        planting_date <- y$planting_date
+        soilid <- x$SoilProfil
+        weatherid <- x$WeatherProfil
+        coords <- data.frame(lat = x["lat"], lon = x["lon"])
+        message(sprintf("(%s, %s), soil: %s, weather: %s.", 
+                        x["lat"], x["lon"], soilid, weatherid))
+        run_dssat_perm(
+            soilid = soilid, plant_density = y$plant_density, 
+            row_spacing = y$row_spacing, N_kg = y$N_kg,
+            weatherid = weatherid, start_year = y$start_year, 
+            end_year = y$end_year, planting_date = planting_date,
+            coords = coords, cultivars = cultivars, 
+            dssat_path = dssat_data_dir, 
+            proj_path = here()) %>% mutate(
+                id = x$id, adm1_pcode = x$adm1_pcode,
+                soilid = soilid, plant_density = y$plant_density,
+                row_spacing = y$row_spacing, N_kg = y$N_kg,
+                weatherid = weatherid, planting_date = planting_date,
+                lat = x[["lat"]], lon = x[["lon"]])
+    }))
+})) %>% mutate(cultivar = str_extract(EXNAME, "TZ[0-4]{4}")) %>% 
+    select(id, adm1_pcode, lat, lon, soilid, weatherid, 
+           cultivar, planting_date, plant_density, 
+           row_spacing, N_kg, HWAH)
+
+save(yields, 
+     file = file.path(agro_result, "dssat_yield_ss_2019_20.rda"))
+
+# Read survey data
+nsca_yield <- read.csv(file.path(agro_dir, "nsca_district_yield.csv"))
+nsca_yield <- right_join(nsca_yield, districts %>% st_drop_geometry(), 
+                        by = c("region" = "Region"))
+
+# Compare modeled and survey
+yields <- left_join(yields, nsca_yield, by = "adm1_pcode")
+save(yields, 
+     file = file.path(agro_result, "dssat_survey_ss_2019_20.rda"))
+
+best_yield <- do.call(rbind, lapply(unique(yields$region), function(rg){
+    yield <- yields %>% filter(region == rg)
+    real_yield <- unique(yield$yield)
+    
+    best_param <- yield %>% 
+        group_by(cultivar, plant_density, row_spacing, 
+                 N_kg, planting_date) %>% 
+        summarise(yield = abs(mean(HWAH) / 1000 - real_yield)) %>% 
+        ungroup() %>% filter(yield == min(yield))
+    data.frame(region = unique(yield$region),
+               yield = best_param$yield + real_yield)
+})) %>% group_by(region) %>% 
+    summarise(yield = mean(yield)) %>% ungroup()
+```
+
+##### Long season
+
+```{r}
+# Long season
+## Planting dates
+planting_dates <- seq(20122, 20152, by = 7) # March
+```
 

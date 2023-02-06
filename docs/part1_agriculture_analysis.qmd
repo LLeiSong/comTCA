@@ -1,0 +1,784 @@
+---
+title: "Part1: agricultural production"
+author: "Lei Song"
+editor: visual
+toc: true
+toc-depth: 2
+number-sections: false
+toc-location: left
+output: 
+  html:
+      theme: journal
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load packages
+# remotes::install_github(repo = "floswald/GAEZr")
+library(sf)
+library(here)
+library(dplyr)
+library(terra)
+library(stringr)
+library(purrr)
+library(GAEZr)
+library(itsdm)
+select <- dplyr::select
+
+# Set paths
+agro_dir <- file.path(here("data/agriculture"))
+result_dir <- here("results")
+```
+
+## Introduction
+
+This document includes details to analyze the yield gaps and potential yield of staple crops (maize and rice) in Tanzania. The whole workflow has two parts:
+
+-   Estimate the current yield over agricultural areas (if grow any).
+-   Predict the attainable yield over the whole country (if grow any).
+
+For task one, we used relevant environmental variables to downscale the rainfed yield [@institute2020] to the planning units of 1 km. For task two, we ran DSSAT model to get the potential yields under commercial management, which were adjusted in accordance with the FAO estimated yield.
+
+## Staple crops in Tanzania
+
+Checking FAO and national agriculture report, the staple food crops (planted area \> 500,000 hectares based on survey in 2019/2020) in Tanzania are:
+
+-   Cereal: maize, paddy
+-   Roots and Tubers: Cassava
+-   Pulses: use this common type because the actual yield is only for pulses.
+
+## Current yield and production
+
+We used low resolution yield/harvest area from GAEZ+2015 [@grogan2022]. The analysis includes four steps:
+
+-   Use environmental variables and random forest model to downscale the yield into 1km resolution.
+-   Use Tanzania agricultural sample survey in Tanzania of 2019/2020 to calibrate the yield.
+-   Use Tanzania agricultural sample survey in Tanzania of 2019/2020 to calibrate the harvest area.
+-   Calculate the crop production.
+
+```{r}
+sf_use_s2(FALSE)
+# Study area
+bry <- read_sf(here("data/geoms/mainland_tanzania.geojson")) %>% 
+    select()
+bry_buf <- bry %>% st_buffer(0.1)
+
+# Read GAEZ+2015
+fnames <- list.files(
+    file.path(agro_dir, "GAEZ._2015_crop_yield"),
+    full.names = TRUE)
+fnames_irr <- fnames[
+    str_detect(fnames, "Maize|Rice|Cassava|Pulse") & 
+        str_detect(fnames, "Irrigated")]
+fnames_rfd <- fnames[
+    str_detect(fnames, "Maize|Rice|Cassava|Pulse") & 
+        str_detect(fnames, "Rainfed")]
+
+# Get yields
+yield_irr <- do.call(c, lapply(fnames_irr, function(fname){
+    rast(fname) %>% crop(bry_buf)}))
+yield_rfd <- do.call(c, lapply(fnames_rfd, function(fname){
+    rast(fname) %>% crop(bry_buf)}))
+
+writeRaster(yield_irr, file.path(agro_dir, "yield_irr.tif"))
+writeRaster(yield_rfd, file.path(agro_dir, "yield_rfd.tif"))
+
+# Get harvest areas
+fnames <- list.files(
+    file.path(agro_dir, "GAEZ._2015_crop_harvest_area"),
+    full.names = TRUE)
+fnames_irr <- fnames[
+    str_detect(fnames, "Maize|Rice|Cassava|Pulse") & 
+        str_detect(fnames, "Irrigated")]
+fnames_rfd <- fnames[
+    str_detect(fnames, "Maize|Rice|Cassava|Pulse") & 
+        str_detect(fnames, "Rainfed")]
+
+# Read rasters
+harvest_area_irr <- do.call(c, lapply(fnames_irr, function(fname){
+    rast(fname) %>% crop(bry_buf)}))
+harvest_area_rfd <- do.call(c, lapply(fnames_rfd, function(fname){
+    rast(fname) %>% crop(bry_buf)}))
+
+writeRaster(harvest_area_irr, file.path(agro_dir, "harvest_area_irr.tif"))
+writeRaster(harvest_area_rfd, file.path(agro_dir, "harvest_area_rfd.tif"))
+```
+
+## Attainable yield
+
+We used the simulated attainable yield under RCP 4.5 in period of 2011 - 2040 (near future) made by FAO GAEZ. The same crop types as current yield were selected.
+
+For pulses, we selected all possible types: phaseolus bean, chickpea, cow pea, dry pea, pigeon pea, pearl millet. Then we used the highest value to represent the attainable yield of pulses.
+
+Because irrigation in Tanzania is not common (covers roughly 2% of all planted area), we only focus on rainfed water supply farming management.
+
+```{r}
+# Use the near future and moderate RCP scenario
+all_scenarios <- allscenarios() %>% 
+    filter(rcp == "rcp4p5") %>% 
+    mutate(time_period = "2020s")
+
+# Select target crops
+crop_codes <- crops %>% 
+    filter(crop %in% c(
+        "maize", "dryland_rice", "wetland_rice", "cassava", 
+        "phaseolus_bean", 'chickpea', 'cowpea', 'drypea', 
+        'pigeonpea', 'pearl_millet'))
+
+# Start to download
+## Use a straightforward way to download
+walk(crop_codes$code, function(cropcode){
+    walk(1:nrow(all_scenarios), function(n){
+        # Create the directory for each crop
+        dst_dir <- file.path(
+            agro_dir, "gaez", 
+            crop_codes %>% filter(code == cropcode) %>% pull(crop))
+        if (!dir.exists(dst_dir)) dir.create(dst_dir)
+        
+        # Download the files
+        scenarios <- all_scenarios[n, ] %>% unlist()
+        base_url <- file.path(
+            "https://s3.eu-west-1.amazonaws.com",
+            "data.gaezdev.aws.fao.org/res05")
+        url <- sprintf(
+            "%s/%s/%s/%sH/ylHr_%s.tif", 
+            base_url, scenarios[1], scenarios[2], scenarios[3],
+            cropcode)
+        dst_fname <- file.path(
+            dst_dir, sprintf(
+                "%s_%s.tif",tools::file_path_sans_ext(basename(url)), 
+                scenarios[1]))
+        download.file(
+            url = url, destfile = dst_fname)
+    })
+})
+
+# Calculate the mean of different scenarios
+bbox <- bry_buf %>% st_bbox() %>% st_as_sfc()
+walk(crop_codes$code, function(cropcode){
+    # Get the dir
+    dst_dir <- file.path(
+            agro_dir, "gaez", 
+            crop_codes %>% filter(code == cropcode) %>% pull(crop))
+    fnames <- list.files(dst_dir, full.names = TRUE)
+    scenario_mean <- do.call(c, lapply(fnames, function(fname){
+        rast(fname) %>% crop(bbox)
+    })) %>% mean(na.rm = TRUE)
+    
+    dst_fname <- file.path(agro_dir, "gaez", sprintf("ylHr_%s.tif", cropcode))
+    
+    writeRaster(scenario_mean, dst_fname)
+})
+```
+
+## Prepare environmental variables
+
+Roughly, we included weather and soil data. The weather dataset is requested from NASA POWER and soil is queried from SoilGrid250m v2.0.
+
+### Weather data
+
+We used Bioclimatic variables to estimate yield. Additionally, we used a mean NDVI of 2015 - 2022 as an extra variable to estimate current yield.
+
+```{r}
+library(stars)
+options(timeout = 10000)
+
+# Current bioclimatic variables
+bbox <- bry_buf %>% st_bbox() %>% st_as_sfc()
+vars_current <- c("tmin", "tmax", "prec", "srad", "vapr")
+
+walk(vars_current, function(var){
+    var_current <- worldclim2(
+        var = var,
+        res = 0.5,
+        bry = bbox,
+        path = file.path(agro_dir, "worldclim"),
+        nm_mark = "tz",
+        return_stack = TRUE)
+    
+    fname <- file.path(agro_dir, "worldclim", 
+                       sprintf("%s_current.tif", var))
+    write_stars(var_current, fname)
+}); unlink(file.path(agro_dir, "worldclim/wc2.1"))
+
+# Future bioclimatic variables
+gcms <- c("ACCESS-CM2", "ACCESS-ESM1-5", "BCC-CSM2-MR", "CanESM5",
+          "CanESM5-CanOE", "CMCC-ESM2", "CNRM-CM6-1", "CNRM-CM6-1-HR",
+          "CNRM-ESM2-1", "EC-Earth3-Veg", "EC-Earth3-Veg-LR", "FIO-ESM-2-0",
+          "GISS-E2-1-G", "GISS-E2-1-H", "HadGEM3-GC31-LL", "INM-CM4-8",
+          "INM-CM5-0", "IPSL-CM6A-LR", "MIROC-ES2L", "MIROC6", "MPI-ESM1-2-HR",
+          "MPI-ESM1-2-LR", "MRI-ESM2-0", "UKESM1-0-LL")
+vars <- c("tmin", "tmax", "prec")
+walk(vars, function(var){
+    walk(gcms, function(gcm){
+        var_future <- future_worldclim2(
+            var = var,
+            res = 0.5,
+            gcm = gcm,
+            ssp = "ssp245",
+            interval = "2021-2040",
+            bry = bbox,
+            path = file.path(agro_dir, "worldclim"),
+            nm_mark = "tz",
+            return_stack = TRUE)
+        
+        dst_fname <- file.path(
+            agro_dir, "worldclim",
+            sprintf("%s_%s_ssp245_2021-2040.tif", 
+                    var, gcm))
+        write_stars(var_future, dst_fname)
+    })
+})
+
+# Calculate the mean of all GCMs
+fnames <- list.files(
+    file.path(agro_dir, "worldclim"),
+    pattern = ".tif",
+    full.names = TRUE)
+fnames <- fnames[!str_detect(fnames, "current")]
+walk(vars, function(var){
+    fnames_var <- fnames[str_detect(fnames, var)]
+    var_mean <- do.call(c, lapply(1:12, function(n){
+        do.call(c, lapply(fnames_var, function(fname){
+            rast(fname, lyrs = n)
+        })) %>% mean(na.rm = TRUE)
+    }))
+    names(var_mean) <- paste0(var, 1:12)
+    
+    dst_fname <- file.path(
+            agro_dir, "worldclim",
+            sprintf("%s_2021-2040.tif", var))
+    writeRaster(var_mean, dst_fname)
+})
+```
+
+### Soil data
+
+-   Percent organic carbon (mean values in the top 1m)
+-   pH (mean values in the top 1m)
+-   Percent clay content (mean values in the top 1m)
+
+```{r}
+# Base URL for ISRIC SoilGrid250m
+sg_url <- "/vsicurl?max_retry=3&retry_delay=1&list_dir=no&url=https://files.isric.org/soilgrids/latest/data/"
+
+# Set the bounding box for download
+sf_use_s2(FALSE)
+crs_igh <- rast(paste0(sg_url,'soc/soc_0-5cm_mean.vrt')) %>% crs()
+crs_wgs <- "EPSG:4326"
+bbox_igh <- bry %>% st_transform(crs_igh) %>% st_bbox() %>% 
+    st_as_sfc() %>% st_buffer(1e5)
+bbox_ll <- bry %>% st_bbox() %>% 
+    st_as_sfc() %>% st_buffer(1)
+
+# Download
+depths <- c("0-5", "5-15", "15-30", "30-60", "60-100", "100-200")
+items <- c("bdod", "cec", "cfvo", "clay", "nitrogen", 
+           "phh2o", "sand", "silt", "soc")
+sg_dir <- file.path(agro_dir, "SoilGrid250m")
+if (!dir.exists(sg_dir)) dir.create(sg_dir)
+
+# Download SOC and BDOD
+walk(items, function(item){
+    dst_dir <- file.path(sg_dir, item)
+    if (!dir.exists(dst_dir)) dir.create(dst_dir)
+    
+    # For each depth
+    walk(depths, function(depth){
+        nm <- sprintf('%s/%s_%scm_mean.vrt', item, item, depth)
+        lyr <- rast(
+            paste0(sg_url, nm)) %>% 
+            crop(bbox_igh) %>% project(crs_wgs)
+        writeRaster(lyr, file.path(dst_dir, basename(gsub("vrt", "tif", nm))))
+    })
+})
+
+# Calculate the mean across horizon layers
+walk(items, function(item){
+    fnames <- list.files(dst_dir, full.names = TRUE)
+    var_mean <- do.call(c, lapply(fnames, function(fname){
+        rast(fname)
+        })) %>% mean(na.rm = TRUE)
+    names(var_mean) <- item
+    
+    dst_fname <- file.path(sg_dir, sprintf("%s_mean.tif", item))
+    writeRaster(var_mean, dst_fname)
+})
+```
+
+## Get the proportion of cropland
+
+```{r}
+library(raster)
+library(pbmcapply)
+select <- dplyr::select
+
+# Read cropland
+lc <- rast("data/landcover/landcover_tz.tif")
+lc[lc != 1] <- NA
+writeRaster(lc, "data/landcover/cropland_tz.tif", datatype = "INT1U")
+
+# Calculate the percentage of planting area
+template <- raster(weathers_gs$prec)
+values(template) <- 1:ncell(template)
+crop_mask <- raster("data/landcover/cropland_tz.tif")
+
+vals <- do.call(rbind, pbmclapply(1:ncell(template), function(id) {
+        blk <- classify(rast(template), cbind(id, 1), others = NA)
+        if (isTRUE(global(blk, fun = "isNA") == ncell(blk))) {
+            return(NA)
+        } else {
+            blk <- trim(blk)
+            blk <- project(blk, crs(rast(crop_mask)))
+            
+            # Do calculation for each window size
+            if (relate(as.polygons(ext(crop_mask)), 
+                       as.polygons(ext(blk)), "intersects")) {
+                # Crop the landscape
+                lc_blk <- crop(rast(crop_mask), blk)
+                
+                # Calculate the metrics
+                if (isTRUE(global(lc_blk, fun = "isNA") != ncell(lc_blk))) {
+                    sum(values(lc_blk), na.rm = TRUE) / ncell(lc_blk)
+                } else {
+                    return(NA)
+                }
+            } else return(NA)
+        }
+    }, mc.cores = detectCores() - 1))
+
+# Write out values
+plant_area <- weathers_gs$prec
+values(plant_area) <- vals
+names(plant_area) <- "plant_area"
+writeRaster(plant_area, "data/landcover/plant_area_tz.tif")
+```
+
+## Downscale the current yield
+### Prepare the training data
+
+```{r}
+# Prepare environmental variables at 1 km scale
+## Read variables
+### MODIS-----------------
+fnames <- file.path(
+    agro_dir, "modis",
+    sprintf("modis_%s_monthly.tif",
+            c("ndvi", "gpp", "lai", "et")))
+modis <- do.call(c, lapply(fnames, function(fname){
+    rast(fname) %>% mean(na.rm = TRUE)
+}))
+names(modis) <- c("ndvi", "gpp", "lai", "et")
+
+### NDVI-----------------
+# ndvi_gs <- rast(
+#     file.path(agro_dir, "ndvi", "lansat8_sr_16_20_wet_NDVI_mean_1000m.tif"))
+
+### Weather--------------
+# Calculate the variables during wet season (Nov to May)
+## To simplify, we fix the wet season for the whole region
+items <- c("prec", "srad", "tmax", "tmin", "tmean", "vapr")
+fnames <- file.path(agro_dir, "worldclim",
+                     sprintf("%s_current.tif", items))
+weathers_gs <- do.call(c, lapply(fnames, function(fname){
+    if (str_detect(fname, "prec")){
+        rast(fname, lyrs = c(11:12, 1:5)) %>% sum(na.rm = TRUE)
+    } else if (str_detect(fname, "tmean")){
+        do.call(c, lapply(c(11:12, 1:5), function(n){
+            mean(rast(file.path(agro_dir, "worldclim",
+                                "tmax_current.tif"), lyrs = n),  
+                 rast(file.path(agro_dir, "worldclim",
+                                "tmin_current.tif"), lyrs = n), na.rm = TRUE)
+        })) %>% mean(na.rm = TRUE)
+    } else {
+        rast(fname, lyrs = c(11:12, 1:5)) %>% mean(na.rm = TRUE)
+    }
+})); names(weathers_gs) <- items
+
+### Soil----------------
+fnames <- list.files(file.path(agro_dir, "SoilGrid250m"),
+                     pattern = ".tif", full.names = TRUE)
+soils <- do.call(c, lapply(fnames, function(fname){
+    rast(fname)
+}))
+
+vars_current <- c(weathers_gs, resample(modis, weathers_gs),
+                  resample(soils, weathers_gs))
+writeRaster(vars_current, 
+            file.path(agro_dir, "variables_current.tif"))
+
+### Pre-processing training data----------------
+# Read yield and filter the cropland area at coarse scale
+crop_mask <- plant_area > 0
+yield_rfd <- rast(file.path(agro_dir, "yield_rfd.tif"))
+yield_rfd <- yield_rfd * resample(crop_mask, yield_rfd, method = "near")
+
+# Prepare environmental variables at coarse scale
+vars_current_10km <- resample(vars_current, yield_rfd)
+
+# Put together and read everything as data.frame
+yields_vars <- c(yield_rfd, vars_current_10km)
+yields_vars <- values(yields_vars) %>% data.frame() %>% 
+    na.omit()
+# Rename the yield columns
+names(yields_vars)[1:4] <- c("cassava", "maize", "pulses", "rice")
+save(yields_vars, file = file.path(agro_dir, "yields_vars_10km.rda"))
+
+# Check the values
+head(yields_vars)
+```
+
+### Fit Random Forest model
+
+```{r}
+### Fit Random Forest----------------
+library(ranger)
+library(parsnip)
+library(tidymodels)
+library(vip)
+library(dials)
+library(tune)
+library(ggplot2)
+library(parallel)
+
+# Split x and y
+yields <- yields_vars[, 1:4]
+vars <- yields_vars[, -c(1:4)]
+
+# Tuning parameters
+crops <- names(yields)
+yields_ds <- do.call(c, lapply(crops, function(crop){
+    # crop <- "cassava"
+    training <- cbind(yields %>% select(all_of(crop)), vars)
+    names(training)[1] <- "yield"
+    
+    ###Tune the model---------------------------
+    set.seed(123)
+    training_split <- initial_split(
+        training, prop = 0.80)
+    yield_train <- training(training_split)
+    yield_test <- testing(training_split)
+    
+    ## Set folds for cross validation
+    set.seed(234)
+    val_set <- validation_split(yield_train, prop = 0.8)
+    
+    ## Tune parameters of RF
+    ### Define tune model
+    rf_mod <- rand_forest(
+        mtry = tune(),
+        trees = 500,
+        min_n = tune()) %>%
+        set_mode("regression") %>%
+        set_engine(
+            "ranger", num.threads = parallel::detectCores())
+    
+    ### Connect to workflow
+    rf_workflow <- workflow() %>%
+        add_model(rf_mod) %>% 
+        add_formula(yield ~ .)
+    
+    # Tune the parameters
+    set.seed(345)
+    rf_res <- 
+        rf_workflow %>% 
+        tune_grid(val_set,
+                  grid = 25,
+                  control = control_grid(save_pred = TRUE),
+                  metrics = metric_set(rmse, mae))
+    
+    rf_best <- rf_res %>% select_best(metric = "rmse")
+    
+    last_rf_mod <- 
+        rand_forest(mtry = rf_best$mtry, min_n = rf_best$min_n, trees = 500) %>% 
+        set_engine("ranger", num.threads = parallel::detectCores(), 
+                   importance = "impurity") %>% 
+        set_mode("regression")
+    
+    # Set the best parameters
+    last_rf_workflow <- 
+        rf_workflow %>% 
+        update_model(last_rf_mod)
+    
+    set.seed(345)
+    last_rf_fit <- 
+        last_rf_workflow %>% 
+        last_fit(training_split)
+    
+    # Check the results
+    last_rf_fit %>% 
+        collect_metrics()
+    
+    # And the variable importance
+    last_rf_fit %>% 
+        extract_fit_parsnip() %>% 
+        vip(num_features = 20)
+    
+    ###Train the model---------------------------
+    rf_md <- last_rf_mod %>% 
+        set_engine("ranger", num.threads = 12) %>% 
+        fit(yield ~ ., training)
+    
+    # Save out
+    model_fit <- list(model = rf_md, evaluation = last_rf_fit)
+    save(model_fit,
+         file = file.path(agro_dir, sprintf("rf_model_current_%s.rda", crop)))
+    
+    # Predict
+    predict(vars_current, rf_md, na.rm = TRUE)
+}))
+names(yields_ds) <- crops
+
+# Save out, t/ha
+yields_ds <- yields_ds * resample(crop_mask, yields_ds, method = "near")
+writeRaster(yields_ds, file.path(agro_dir, "current_yields_1km.tif"))
+```
+
+## Downscale the attainable yield
+### Prepare the training data
+
+```{r}
+# Prepare environmental variables at 1 km scale
+## Read variables
+### MODIS-----------------
+fnames <- file.path(
+    agro_dir, "modis",
+    sprintf("modis_%s_monthly.tif",
+            c("et")))
+modis <- do.call(c, lapply(fnames, function(fname){
+    rast(fname) %>% mean(na.rm = TRUE)
+}))
+names(modis) <- c("et")
+
+### NDVI-----------------
+# ndvi_gs <- rast(
+#     file.path(agro_dir, "ndvi", "lansat8_sr_16_20_wet_NDVI_mean_1000m.tif"))
+
+### Weather--------------
+# Calculate the variables during wet season (Nov to May)
+## To simplify, we fix the wet season for the whole region
+items <- c("prec", "tmax", "tmin", "tmean")
+fnames <- file.path(agro_dir, "worldclim",
+                     sprintf("%s_2021-2040.tif", items))
+weathers_gs <- do.call(c, lapply(fnames, function(fname){
+    if (str_detect(fname, "prec")){
+        rast(fname, lyrs = c(11:12, 1:5)) %>% sum(na.rm = TRUE)
+    } else if (str_detect(fname, "tmean")){
+        do.call(c, lapply(c(11:12, 1:5), function(n){
+            mean(rast(file.path(agro_dir, "worldclim",
+                                "tmax_current.tif"), lyrs = n),  
+                 rast(file.path(agro_dir, "worldclim",
+                                "tmin_current.tif"), lyrs = n), na.rm = TRUE)
+        })) %>% mean(na.rm = TRUE)
+    } else {
+        rast(fname, lyrs = c(11:12, 1:5)) %>% mean(na.rm = TRUE)
+    }
+})); names(weathers_gs) <- items
+
+### Soil----------------
+fnames <- list.files(file.path(agro_dir, "SoilGrid250m"),
+                     pattern = ".tif", full.names = TRUE)
+soils <- do.call(c, lapply(fnames, function(fname){
+    rast(fname)
+}))
+
+vars_future <- c(weathers_gs, resample(modis, weathers_gs),
+                  resample(soils, weathers_gs))
+writeRaster(vars_future, 
+            file.path(agro_dir, "variables_future.tif"))
+
+### Pre-processing training data----------------
+# Read yield
+yield_rfd <- do.call(c, lapply(crops, function(crop){
+    if (crop == "cassava"){
+        rast(file.path(agro_dir, "gaez/ylHr_csv.tif"))
+    } else if (crop == "maize"){
+        rast(file.path(agro_dir, "gaez/ylHr_mze.tif"))
+    } else if (crop == "pulses"){
+        max(rast(file.path(agro_dir, "gaez/ylHr_phb.tif")),
+            rast(file.path(agro_dir, "gaez/ylHr_pig.tif")),
+            rast(file.path(agro_dir, "gaez/ylHr_pml.tif")),
+            rast(file.path(agro_dir, "gaez/ylHr_chk.tif")),
+            rast(file.path(agro_dir, "gaez/ylHr_cow.tif")))
+    } else {
+        mean(rast(file.path(agro_dir, "gaez/ylHr_rcd.tif")),
+             rast(file.path(agro_dir, "gaez/ylHr_rcw.tif")))
+    }
+})); names(yield_rfd) <- crops
+writeRaster(yield_rfd, file.path(agro_dir, "yield_rfd_attainable.tif"))
+
+# Prepare environmental variables at coarse scale
+vars_future_10km <- resample(vars_future, yield_rfd)
+
+# Put together and read everything as data.frame
+yields_vars <- c(yield_rfd, vars_future_10km)
+yields_vars <- values(yields_vars) %>% data.frame() %>% 
+    na.omit()
+# Rename the yield columns
+save(yields_vars, file = file.path(agro_dir, "yields_attainable_vars_10km.rda"))
+
+# Check the values
+head(yields_vars)
+```
+
+### Fit Random Forest model
+
+```{r}
+### Fit Random Forest----------------
+# Split x and y
+yields <- yields_vars[, 1:4]
+vars <- yields_vars[, -c(1:4)]
+
+# Tuning parameters
+crops <- names(yields)
+yields_ds <- do.call(c, lapply(crops, function(crop){
+    # crop <- "cassava"
+    training <- cbind(yields %>% select(all_of(crop)), vars)
+    names(training)[1] <- "yield"
+    
+    ###Tune the model---------------------------
+    set.seed(123)
+    training_split <- initial_split(
+        training, prop = 0.80)
+    yield_train <- training(training_split)
+    yield_test <- testing(training_split)
+    
+    ## Set folds for cross validation
+    set.seed(234)
+    val_set <- validation_split(yield_train, prop = 0.8)
+    
+    ## Tune parameters of RF
+    ### Define tune model
+    rf_mod <- rand_forest(
+        mtry = tune(),
+        trees = 500,
+        min_n = tune()) %>%
+        set_mode("regression") %>%
+        set_engine(
+            "ranger", num.threads = parallel::detectCores())
+    
+    ### Connect to workflow
+    rf_workflow <- workflow() %>%
+        add_model(rf_mod) %>% 
+        add_formula(yield ~ .)
+    
+    # Tune the parameters
+    set.seed(345)
+    rf_res <- 
+        rf_workflow %>% 
+        tune_grid(val_set,
+                  grid = 25,
+                  control = control_grid(save_pred = TRUE),
+                  metrics = metric_set(rmse, mae))
+    
+    rf_best <- rf_res %>% select_best(metric = "rmse")
+    
+    last_rf_mod <- 
+        rand_forest(mtry = rf_best$mtry, min_n = rf_best$min_n, trees = 500) %>% 
+        set_engine("ranger", num.threads = parallel::detectCores(), 
+                   importance = "impurity") %>% 
+        set_mode("regression")
+    
+    # Set the best parameters
+    last_rf_workflow <- 
+        rf_workflow %>% 
+        update_model(last_rf_mod)
+    
+    set.seed(345)
+    last_rf_fit <- 
+        last_rf_workflow %>% 
+        last_fit(training_split)
+    
+    # Check the results
+    last_rf_fit %>% 
+        collect_metrics()
+    
+    # And the variable importance
+    last_rf_fit %>% 
+        extract_fit_parsnip() %>% 
+        vip(num_features = 20)
+    
+    ###Train the model---------------------------
+    rf_md <- last_rf_mod %>% 
+        set_engine("ranger", num.threads = 12) %>% 
+        fit(yield ~ ., training)
+    
+    # Save out
+    model_fit <- list(model = rf_md, evaluation = last_rf_fit)
+    save(model_fit,
+         file = file.path(agro_dir, sprintf("rf_model_%s.rda", crop)))
+    
+    # Predict
+    predict(vars_current, rf_md, na.rm = TRUE)
+})); names(yields_ds) <- crops
+
+# Save out, kg/ha
+writeRaster(yields_ds, file.path(agro_dir, "attainable_yields_1km.tif"))
+```
+
+## Calculate agricultural intensification and expansion
+
+```{r}
+# Read files
+plant_area <- rast("data/landcover/plant_area_tz.tif")
+current_yields <- rast(file.path(agro_dir, "current_yields_1km.tif"))
+atn_yields <- rast(file.path(agro_dir, "attainable_yields_1km.tif"))
+
+# Each pixel is 1km * 1km = 100ha
+plant_area <- plant_area * 100
+
+# t/ha = kg/ha * 1000
+atn_yields <- atn_yields / 1000
+
+# intensification will happen within the current cropland
+## will use production, production = yield * plant_date
+crops <- c("cassava", "maize", "pulses", "rice")
+yield_gaps <- do.call(c, lapply(crops, function(crop){
+    # attainable gaps over the whole region
+    attainable_yield <- atn_yields[crop]
+    
+    # yield gaps over current cropland
+    yield_current <- current_yields[crop]
+    attainable_yield - yield_current
+}))
+writeRaster(yield_gaps, file.path(agro_dir, "yield_gaps.tif"))
+
+# Production to increase over cropland areas
+production_to_increase <- do.call(c, lapply(crops, function(crop){
+    # attainable gaps over the whole region
+    attainable_yield <- atn_yields[crop]
+    
+    # yield gaps over current cropland
+    yield_current <- current_yields[crop]
+    (attainable_yield - yield_current) * plant_area
+}))
+writeRaster(
+    production_to_increase, file.path(agro_dir, "production_to_increase.tif"))
+
+# expansion include expand to completely new land or 
+# within the current planning units have cropland
+production_to_expansion <- do.call(c, lapply(crops, function(crop){
+    # attainable gaps over the whole region
+    attainable_yield <- atn_yields[crop]
+    sum(mask(attainable_yield * 100, crop_mask, 
+             inverse = TRUE),
+        attainable_yield * (100 - plant_area), na.rm = TRUE)
+}))
+writeRaster(
+    production_to_expansion, file.path(agro_dir, "production_to_expansion.tif"))
+```
+
+## Save out
+
+```{r}
+overall_increase <- mean(production_to_increase, na.rm = TRUE)
+writeRaster(
+    overall_increase, file.path(result_dir, "production_intens.tif"))
+
+overall_expansion <- mean(production_to_expansion, na.rm = TRUE)
+overall_expansion[overall_expansion == 0] <- NA
+writeRaster(
+    overall_expansion, file.path(result_dir, "production_expans.tif"))
+```

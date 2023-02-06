@@ -1305,22 +1305,24 @@ writeRaster(bhi_msa_bii, file.path(bio_data_dir, "bhi_msa_bii.tif"))
 We calculated composite biodiversity indicators (BIp and BIr) according to [@soto-navarro2020]. We modified $S_{i}$ to include more aspects.
 
 ```{r}
-# Calculate biodiversity indicators
+# Calculate biodiversity indicator
 # Reference: Soto-Navarro et al. 2020
 # BIp <- b * c
-# BIr <- b * (1 - c)
 # b = S (species component) + E (ecosystems component)
 # c is BHI
 # S is the geometric mean of SR and RWR
 # E is the arithmetic mean of MSA and BII
-## First, calculate S
 
 # Read files
 bhi_msa_bii <- rast(file.path(bio_data_dir, "bhi_msa_bii.tif"))
 
 # Calculate species component
-normalize <- function(x) {
-  (x - minmax(x)[1]) / (minmax(x)[2] - minmax(x)[1])
+normalize <- function(x, robust = FALSE) {
+    if (robust){
+        stretch(x, minv = 0, maxv = 1, minq = 0, maxq = 0.95)
+    } else {
+        (x - minmax(x)[1]) / (minmax(x)[2] - minmax(x)[1])
+    }
 }
 
 richness_dir <- file.path(bio_data_dir, "species_richness")
@@ -1330,12 +1332,13 @@ fnames <- list.files(richness_dir, full.names = TRUE)
 richness_fns <- fnames[grepl("weighted", fnames) & !grepl("endemism", fnames)]
 richness <- do.call(
     c, lapply(richness_fns, function(fn){
-    normalize(rast(fn))})) %>% mean() %>% normalize()
+    normalize(rast(fn) %>% mask(bry_buf))})) %>% mean() %>% normalize()
 
 endemism_fns <- fnames[grepl("weighted", fnames) & grepl("endemism", fnames)]
+# Use 0-95% stretch because of some outlier values
 endemism <- do.call(
     c, lapply(endemism_fns, function(fn){
-    normalize(rast(fn))})) %>% mean() %>% normalize()
+    normalize(rast(fn) %>% mask(bry_buf), TRUE)})) %>% mean() %>% normalize()
 
 # Geometric mean for species richness and endemism richness
 # (the Nth root of the product of N numbers - 
@@ -1354,12 +1357,10 @@ E <- mean(bhi_msa_bii[["MSA"]], bhi_msa_bii[["BII"]])
 b <- resample(S, E) + E
 c <- bhi_msa_bii[["BHI"]]
 BIp <- b * c
-BIr <- b * (1 - c)
 
 # Save out
 # NOTE: the values outside of Tanzania is not valid
 # because species components does not cover these areas.
-BIs <- c(BIp, BIr)
-names(BIs) <- c("BIp", "BIr")
-writeRaster(BIs, file.path(bio_data_dir, "BIs.tif"))
+names(BIp) <- "BIp"
+writeRaster(BIp, file.path(rlt_dir, "BIp.tif"))
 ```

@@ -66,6 +66,7 @@ bry <- read_sf(here("data/geoms/mainland_tanzania.geojson")) %>% select()
 sg_url <- "/vsicurl?max_retry=3&retry_delay=1&list_dir=no&url=https://files.isric.org/soilgrids/latest/data/"
 
 # Set the bounding box for download
+sf_use_s2(FALSE)
 crs_igh <- rast(paste0(sg_url,'soc/soc_0-5cm_mean.vrt')) %>% crs()
 crs_wgs <- "EPSG:4326"
 bbox_igh <- bry %>% st_transform(crs_igh) %>% st_bbox() %>% 
@@ -234,5 +235,6 @@ writeRaster(bms_carbon, file.path(carbon_data_dir, "biomass_carbon.tif"))
 # biomass carbon: Mg/ha
 # they are the same
 carbon <- bms_carbon + resample(soct_1m, bms_carbon)
+names(carbon) <- "carbon_cost"
 writeRaster(carbon, file.path(rlt_dir, "carbon_cost.tif"))
 ```

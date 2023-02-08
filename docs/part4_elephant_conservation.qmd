@@ -26,6 +26,7 @@ select <- dplyr::select
 data_dir <- here("data")
 ele_data_dir <- here("data/elephant")
 rlt_dir <- here("results")
+trdeoff_dir <- here("data/tradeoff")
 ```
 
 ## Introduction
@@ -61,10 +62,8 @@ pas <- read_sf(file.path(ele_data_dir, "census.geojson"))
 
 In this step, we used circuitscape to simulate the landscape connectivity. We used 50% randomly selected blocks as nodes, and suitability as conductance in circuitscape. Then we ran 50 simulations and aggregate the results to represent the final landscape connectivity.
 
-```
-cd /path/to/comTCA
-Rscript scripts/circuit_sim.R -n 50
-```
+    cd /path/to/comTCA
+    Rscript scripts/circuit_sim.R -n 50
 
 ## Merge two layers
 
@@ -75,11 +74,14 @@ fname <- file.path(ele_data_dir, "landscape_utility_1km_integrated.tif")
 suitability <- rast(fname)[["prediction"]]
 
 connectivity <- rast(file.path(ele_data_dir, "mean_curmap.tif"))
-connectivity <- stretch(connectivity, minv = 0, maxv = 1)
-
-ele_conserv <- sqrt(suitability * connectivity)
+# connectivity <- stretch(connectivity, minv = 0, maxv = 1)
+# ele_conserv <- sqrt(suitability * connectivity)
+ele_conserv <- stretch(
+    connectivity, minv = 0, maxv = 1, 
+    minq = 0.1, maxq = 0.99)
 
 # Write out
 writeRaster(
-    ele_conserv, file.path(ele_data_dir, "elephant_conservation_index.tif"))
+    ele_conserv, file.path(trdeoff_dir, "elephant_conservation_index.tif"),
+    overwrite = TRUE)
 ```

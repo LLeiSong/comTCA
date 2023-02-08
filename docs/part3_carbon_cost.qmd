@@ -25,6 +25,7 @@ select <- dplyr::select
 # Set paths
 carbon_data_dir <- here("data/carbon")
 rlt_dir <- here("results")
+trdeoff_dir <- here("data/tradeoff")
 ```
 
 ## Introduction
@@ -193,7 +194,7 @@ writeRaster(abv_bms, file.path(carbon_data_dir, "aboveground_biomass.tif"))
 # grassland (plus wetland and bareland) - 1.887
 # cropland - 0.2 (estimated)
 # water/built-up - 0
-landcover <- rast(file.path("data/landcover/landcover_1km.tif"))
+landcover <- rast(file.path("data/landcover/landcover_tz_1km.tif"))
 landcover <- project(landcover, abv_bms, method = "near")
 
 # savanna
@@ -236,5 +237,5 @@ writeRaster(bms_carbon, file.path(carbon_data_dir, "biomass_carbon.tif"))
 # they are the same
 carbon <- bms_carbon + resample(soct_1m, bms_carbon)
 names(carbon) <- "carbon_cost"
-writeRaster(carbon, file.path(rlt_dir, "carbon_cost.tif"))
+writeRaster(carbon, file.path(trdeoff_dir, "carbon_cost.tif"))
 ```

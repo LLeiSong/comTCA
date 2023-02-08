@@ -29,6 +29,7 @@ select <- dplyr::select
 data_dir <- here("data")
 bio_data_dir <- here("data/biodiversity")
 rlt_dir <- here("results")
+trdeoff_dir <- here("data/tradeoff")
 ```
 
 ## Introduction
@@ -1362,5 +1363,5 @@ BIp <- b * c
 # NOTE: the values outside of Tanzania is not valid
 # because species components does not cover these areas.
 names(BIp) <- "BIp"
-writeRaster(BIp, file.path(rlt_dir, "BIp.tif"))
+writeRaster(BIp, file.path(trdeoff_dir, "BIp.tif"))
 ```

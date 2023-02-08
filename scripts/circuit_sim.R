@@ -1,3 +1,17 @@
+## --------------------------------------------
+## Script name: circuit_sim.R
+## Purpose of script: script to run circuitscape
+## Author: Lei Song
+## Date Created: 2023-01-24
+##
+## Copyright (c) Lei Song, 2023
+## Email: lsong@clarku.edu
+## --------------------------------------------
+## Run in terminal: 
+## Rscript scripts/circuit_sim.R -n 50
+## --------------------------------------------
+
+# Load libraries
 library(here)
 library(terra)
 library(ggplot2)

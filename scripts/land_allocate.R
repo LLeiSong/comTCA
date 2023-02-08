@@ -1,3 +1,14 @@
+## --------------------------------------------
+## Script name: land_allocate
+## Purpose of script: function to allocate the
+## land for reconciling
+## Author: Lei Song
+## Date Created: 2023-01-24
+##
+## Copyright (c) Lei Song, 2023
+## Email: lsong@clarku.edu
+## --------------------------------------------
+
 # Function to allocate the land for agriculture
 land_allocate <- function(
         potential_production, 

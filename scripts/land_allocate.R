@@ -43,7 +43,8 @@ land_allocate <- function(
     new_vals <- rep(0, ncell(potential_production))
     new_vals[cell_ids] <- 1
     values(agro_land) <- new_vals
+    agro_land[agro_land == 0] <- NA
     dst_fname <- file.path(
-        dst_dir, sprintf("fut_agro_land_%s_equal.tif", scenario))
-    writeRaster(agro_land, dst_fname)
+        dst_dir, sprintf("fut_agro_land_%s.tif", scenario))
+    writeRaster(agro_land, dst_fname, datatype = "INT1U")
 }

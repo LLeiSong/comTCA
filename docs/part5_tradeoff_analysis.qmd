@@ -89,26 +89,16 @@ pas <- pas %>% filter(str_detect(DESIG, "Forest|forest")) %>%
 ```{r}
 # Read layers
 fnames <- list.files(trdeoff_dir, full.names = TRUE)
-
 template <- rast(fnames[1]) %>% crop(bry) %>% mask(bry)
+
 fnames_80 <- fnames[!str_detect(fnames, "60")]
 inputs_80 <- do.call(c, lapply(fnames_80, function(fname){
-    if (str_detect(fname, "carbon")){
-        rast(fname) %>% resample(template) %>% 
-            crop(bry) %>% mask(bry)
-    } else {
-        rast(fname) %>% crop(bry) %>% mask(bry)
-    }
+    rast(fname) %>% crop(bry) %>% mask(bry)
 }))
 
 fnames_60 <- fnames[!str_detect(fnames, "80")]
 inputs_60 <- do.call(c, lapply(fnames_60, function(fname){
-    if (str_detect(fname, "carbon")){
-        rast(fname) %>% resample(template) %>% 
-            crop(bry) %>% mask(bry)
-    } else {
-        rast(fname) %>% crop(bry) %>% mask(bry)
-    }
+    rast(fname) %>% crop(bry) %>% mask(bry)
 }))
 
 names(inputs_80) <- c(
@@ -226,6 +216,7 @@ land_allocate(
     production_need, cbetas_bcep, result_dir,
     "bcep_60")
 
+# Production gain + carbon cost + biodiversity cost
 cbetas_bcp <- c(
     "biodiversity_cost" = 1/4, "carbon_cost" = 1/4, 
     "elephant_cons_index" = 0, "production_gain" = 1/4,
@@ -242,20 +233,20 @@ land_allocate(
     production_need, cbetas_bcp, result_dir,
     "bcp_60")
 
+# Production only
 cbetas_bce <- c(
-    "biodiversity_cost" = 1/4, "carbon_cost" = 1/4, 
-    "elephant_cons_index" = 1/4, "production_gain" = 0,
-    "travel_time" = 1/4)
+    "biodiversity_cost" = 0, "carbon_cost" = 0, 
+    "elephant_cons_index" = 0, "production_gain" = 1/2,
+    "travel_time" = 1/2)
 
 # 80 scenario
 land_allocate(
     inputs_80_std[["potential_production"]], inputs_80_std, 
     production_need, cbetas_bce, result_dir,
-    "bce_80")
+    "p_80")
 # 60 scenario
 land_allocate(
     inputs_60_std[["potential_production"]], inputs_60_std, 
     production_need, cbetas_bce, result_dir,
-    "bce_60")
+    "p_60")
 ```
-

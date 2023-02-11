@@ -235,7 +235,33 @@ writeRaster(bms_carbon, file.path(carbon_data_dir, "biomass_carbon.tif"))
 # soil carbon: t/ha
 # biomass carbon: Mg/ha
 # they are the same
-carbon <- bms_carbon + resample(soct_1m, bms_carbon)
-names(carbon) <- "carbon_cost"
-writeRaster(carbon, file.path(trdeoff_dir, "carbon_cost.tif"))
+## 100% of vegetative carbon and 25% of soil carbon
+carbon <- bms_carbon + resample(soct_1m, bms_carbon) * 0.25
+names(carbon) <- "carbon_density"
+writeRaster(carbon, file.path(carbon_data_dir, "carbon_density.tif"))
 ```
+
+## Carbon cost
+
+```{r}
+# Carbon cost = carbon density * convert area
+# t/ha * ha = t
+plant_area <- rast("data/landcover/plant_area_tz.tif")
+# Each pixel is 1km * 1km = 100ha,
+plant_area <- plant_area * 100
+plant_area[is.na(plant_area)] <- 0
+
+# Resample
+carbon <- resample(carbon, plant_area)
+
+area_release_80 <- 100 * 0.8 - plant_area
+area_release_80[area_release_80 < 0] <- 0
+carbon_cost_80 <- carbon * area_release_80
+writeRaster(carbon_cost_80, file.path(trdeoff_dir, "carbon_cost_80.tif"))
+
+area_release_60 <- 100 * 0.6 - plant_area
+area_release_60[area_release_60 < 0] <- 0
+carbon_cost_60 <- carbon * area_release_60
+writeRaster(carbon_cost_60, file.path(trdeoff_dir, "carbon_cost_60.tif"))
+```
+

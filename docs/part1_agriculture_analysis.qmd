@@ -727,7 +727,7 @@ writeRaster(yields_ds, file.path(agro_dir, "attainable_yields_1km.tif"))
 
 ## Calculate agricultural intensification and expansion
 
-We used the average production instead of single production for all crops to keep the agriculture development strategy flexible. The argument here is to target the area with high potential for food production. 
+We used the average production instead of single production for all crops to keep the agriculture development strategy flexible. The argument here is to target the area with high potential for food production.
 
 Also, because we used the simulated attainable yield made by GAEZ, which considered the future climate. Some areas may become less productive when the yield gain from agricultural management is less than the yield loss from climate change.
 

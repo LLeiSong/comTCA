@@ -89,6 +89,7 @@ pas <- pas %>% filter(str_detect(DESIG, "Forest|forest")) %>%
 ```{r}
 # Read layers
 fnames <- list.files(trdeoff_dir, full.names = TRUE)
+fnames <- fnames[!str_detect(fnames, "mean_attainable_yield")]
 template <- rast(fnames[1]) %>% crop(bry) %>% mask(bry)
 
 fnames_80 <- fnames[!str_detect(fnames, "60")]
@@ -97,18 +98,24 @@ inputs_80 <- do.call(c, lapply(fnames_80, function(fname){
 }))
 
 fnames_60 <- fnames[!str_detect(fnames, "80")]
+fnames_60 <- fnames_60[!str_detect(fnames_60, "_half")]
 inputs_60 <- do.call(c, lapply(fnames_60, function(fname){
     rast(fname) %>% crop(bry) %>% mask(bry)
 }))
 
-names(inputs_80) <- c(
+fnames_60_half <- fnames[!str_detect(fnames, "80")]
+fnames_60_half <- fnames_60_half[-c(5, 7)]
+inputs_60_half <- do.call(c, lapply(fnames_60_half, function(fname){
+    rast(fname) %>% crop(bry) %>% mask(bry)
+}))
+
+nms <- c(
     "biodiversity_cost", "carbon_cost", 
     "elephant_cons_index", "potential_production", 
     "production_gain", "travel_time")
-names(inputs_60) <- c(
-    "biodiversity_cost", "carbon_cost", 
-    "elephant_cons_index", "potential_production", 
-    "production_gain", "travel_time")
+names(inputs_80) <- nms
+names(inputs_60) <- nms
+names(inputs_60_half) <- nms
 
 # Apply masks
 ## Waters + settlements
@@ -129,6 +136,8 @@ inputs_80 <- mask(inputs_80, msk, inverse = TRUE)
 writeRaster(inputs_80, file.path(result_dir, "tradeoff_inputs_80.tif"))
 inputs_60 <- mask(inputs_60, msk, inverse = TRUE)
 writeRaster(inputs_60, file.path(result_dir, "tradeoff_inputs_60.tif"))
+inputs_60_half <- mask(inputs_60_half, msk, inverse = TRUE)
+writeRaster(inputs_60_half, file.path(result_dir, "tradeoff_inputs_60_half.tif"))
 ```
 
 So far, the inputs are ready to be used in the trade-off analysis workflow.
@@ -152,6 +161,7 @@ The spatial planning unit is 1 square km (100 ha). The evaluation unit is per pr
 # Mask out PAs
 inputs_80 <- mask(inputs_80, pas, inverse = TRUE)
 inputs_60 <- mask(inputs_60, pas, inverse = TRUE)
+inputs_60_half <- mask(inputs_60_half, pas, inverse = TRUE)
 
 # Normalize
 inputs_80_std <- do.call(c, lapply(names(inputs_80), function(name){
@@ -178,12 +188,27 @@ inputs_60_std <- do.call(c, lapply(names(inputs_60), function(name){
     lyr
 }))
 
+inputs_60_half_std <- do.call(c, lapply(names(inputs_60_half), function(name){
+    lyr <- inputs_60_half[[name]]
+    if (name == "production_gain") {
+        lyr <- stretch(lyr, minv = 0, maxv = 1)
+    } else if (name == "potential_production") {
+        lyr <- lyr
+    } else {
+        lyr <- 1 - stretch(lyr, minv = 0, maxv = 1)
+    }
+    lyr
+}))
+
 # Save out
 writeRaster(
     inputs_80_std, file.path(result_dir, "tradeoff_inputs_80_std.tif"),
     overwrite = TRUE)
 writeRaster(
     inputs_60_std, file.path(result_dir, "tradeoff_inputs_60_std.tif"),
+    overwrite = TRUE)
+writeRaster(
+    inputs_60_half_std, file.path(result_dir, "tradeoff_inputs_60_half_std.tif"),
     overwrite = TRUE)
 ```
 
@@ -197,6 +222,11 @@ source("scripts/land_allocate.R")
 
 # Set parameters
 ## Roughly 4-folds of current production
+## Current production: 12261147 tons
+## Maize: 6500773 tons
+## Paddy: 3330293 tons
+## Cassava: 1770608 tons
+## Beans: 659473 tons
 production_need <- 50000000
 
 # Equally consider all factors
@@ -215,6 +245,11 @@ land_allocate(
     inputs_60_std[["potential_production"]], inputs_60_std, 
     production_need, cbetas_bcep, result_dir,
     "bcep_60")
+# 60 with no production gain scenario
+land_allocate(
+    inputs_60_half_std[["potential_production"]], inputs_60_half_std, 
+    production_need, cbetas_bcep, result_dir,
+    "bcep_60_half")
 
 # Production gain + carbon cost + biodiversity cost
 cbetas_bcp <- c(

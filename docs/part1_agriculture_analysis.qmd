@@ -746,9 +746,9 @@ atn_yields <- atn_yields / 1000
 atn_yields_half <- atn_yields / 2
 
 # Save out mean yield
-writeRaster(
-    mean(atn_yields), file.path(trdeoff_dir, "mean_attainable_yield.tif"),
-    overwrite = TRUE)
+# writeRaster(
+#     mean(atn_yields), file.path(trdeoff_dir, "mean_attainable_yield.tif"),
+#     overwrite = TRUE)
 
 # intensification will happen within the current cropland
 ## will use production, production = yield * plant_area
@@ -885,9 +885,10 @@ writeRaster(
     file.path(agro_dir, "production_expans_60_half.tif"))
 
 overall_current <- mean(production_current, na.rm = TRUE)
+overall_current[is.na(overall_current)] <- 0
 overall_current <- mask(crop(overall_current, bry), bry)
 writeRaster(
-    overall_current, file.path(agro_dir, "overall_production_current.tif"))
+    overall_current, file.path(trdeoff_dir, "overall_production_current.tif"))
 
 ## Tailor the travel time to the country exactly
 travel_time[travel_time == -9999] <- NA

@@ -285,3 +285,166 @@ land_allocate(
     production_need, cbetas_bce, result_dir,
     "p_60")
 ```
+
+## Get the optimal tradeoff for each objective
+
+```{r}
+library(purrr)
+
+# Fresh start
+source("scripts/land_allocate.R")
+production_need <- 50000000
+inputs_60_std <- rast(file.path(result_dir, "tradeoff_inputs_60_std.tif"))
+optimal_dir <- file.path(result_dir, "optimal")
+if (!dir.exists(optimal_dir)) dir.create(optimal_dir)
+
+# All the following calculation use 60% scenario
+# First, let's calculate the optimal condition for each ecological costs
+# Equally consider all factors
+cbetas_p <- c(
+    "biodiversity_cost" = 0, "carbon_cost" = 0, 
+    "elephant_cons_index" = 0, "current_production" = 1/3, 
+    "production_gain" = 1/3, "travel_time" = 1/3)
+cbetas_b <- c(
+    "biodiversity_cost" = 3/4, "carbon_cost" = 0, 
+    "elephant_cons_index" = 0, "current_production" = 1/12, 
+    "production_gain" = 1/12, "travel_time" = 1/12)
+cbetas_c <- c(
+    "biodiversity_cost" = 0, "carbon_cost" = 3/4, 
+    "elephant_cons_index" = 0, "current_production" = 1/12, 
+    "production_gain" = 1/12, "travel_time" = 1/12)
+cbetas_e <- c(
+    "biodiversity_cost" = 0, "carbon_cost" = 0, 
+    "elephant_cons_index" = 3/4, "current_production" = 1/12, 
+    "production_gain" = 1/12, "travel_time" = 1/12)
+cbetas <- list(cbetas_p, cbetas_b, cbetas_c, cbetas_e)
+names(cbetas) <- c("P", "B", "C", "E")
+
+walk(names(cbetas), function(scenario){
+    message(sprintf("Find optimal solution for scenario: %s", scenario))
+    land_allocate(
+        inputs_60_std[["potential_production"]], inputs_60_std, 
+        production_need, cbetas[[scenario]], optimal_dir,
+        scenario)})
+```
+
+## Balance ecological objectives
+
+Use a fixed 1/3 for production, and balance costs of biodiversity, carbon, and elephant migration.
+
+```{r}
+library(pbmcapply)
+
+# Read costs
+costs <- rast(file.path(result_dir, "tradeoff_inputs_60.tif"))
+costs <- subset(costs, 1:3)
+
+# Get the minimum costs for each objective
+fnames <- file.path(
+    optimal_dir, sprintf("fut_agro_land_%s.tif", c("B", "C", "E")))
+costs_bcd <- c(rast(fnames), costs)
+names(costs_bcd)[1:3] <- c("B", "C", "E")
+sum_cost_bce <- values(costs_bcd) %>% 
+    as_tibble() %>% na.omit()
+min_costs <- do.call(cbind, lapply(c("B", "C", "E"), function(scn){
+    sum_cost <- sum_cost_bce %>% 
+        select(-setdiff(c("B", "C", "E"), scn))
+    sum_costs <- data.frame(t(colSums(sum_cost)[-1]))
+    sum_costs[which(c("B", "C", "E") == scn)]
+}))
+names(min_costs) <- c("B", "C", "E")
+
+# Get the maximum costs for each objective
+fname <- file.path(
+    optimal_dir, "fut_agro_land_P.tif")
+costs_p <- c(rast(fname), costs)
+names(costs_p)[1] <- "P"
+sum_costs_p <- values(costs_p) %>% 
+    as_tibble() %>% na.omit()
+max_costs <- data.frame(t(colSums(sum_costs_p)[-1]))
+names(max_costs) <- c("B", "C", "E")
+
+# Gather together
+min_max_costs <- rbind(
+    min_costs %>% mutate(type = "min", .before = 1),
+    max_costs %>% mutate(type = "max", .before = 1))
+save(min_max_costs, file = file.path(optimal_dir, "tune_min_max_costs.rda"))
+
+# Tune three costs together
+# take elephant migration as a starting point
+e_weights <- seq(0, 3/4, 0.01)
+tune_costs <- do.call(rbind, pbmclapply(e_weights, function(e_weight){
+    # Then carbon cost
+    c_weights <- seq(0, 3/4 - e_weight, 0.01)
+    
+    # Calculate the land allocation
+    do.call(rbind, lapply(c_weights, function(c_weight){
+        scenario <- sprintf("bce%s%s", e_weight, c_weight)
+        b_weight <- 3/4 - e_weight - c_weight
+        cbetas <- c(
+            "biodiversity_cost" = b_weight, "carbon_cost" = c_weight, 
+            "elephant_cons_index" = e_weight, "current_production" = 1/12, 
+            "production_gain" = 1/12, "travel_time" = 1/12)
+        land_allocate(
+            inputs_60_std[["potential_production"]], inputs_60_std, 
+            production_need, cbetas, optimal_dir,
+            scenario)
+        
+        # Calculate the costs
+        fname <- file.path(
+            optimal_dir, sprintf("fut_agro_land_%s.tif", scenario))
+        costs_bcd <- c(rast(fname), costs)
+        names(costs_bcd)[1] <- "land_alloc"
+        sum_cost <- values(costs_bcd) %>% 
+            as_tibble() %>% na.omit()
+        unlink(fname)
+        data.frame(t(colSums(sum_cost)[-1])) %>%
+            as_tibble() %>% 
+            mutate(b_weight = b_weight,
+                   c_weight = c_weight,
+                   e_weight = e_weight)}))
+}, mc.cores = 11))
+```
+
+## Analyze
+
+```{r}
+# Define function
+normalit <- function(m) (m - min(m))/(max(m) - min(m))
+
+# Normalize the cost
+tune_costs <- tune_costs %>% 
+    mutate(biodiversity_cost_norm = normalit(biodiversity_cost),
+           carbon_cost_norm = normalit(carbon_cost),
+           elephant_cons_index_norm = normalit(elephant_cons_index))
+
+# Find the most balanced solution
+stds <- sapply(1:nrow(tune_costs), function(n){
+    sd(tune_costs[n, 7:9])
+})
+tune_costs <- tune_costs %>% 
+    mutate(score = stds) %>% 
+    arrange(score)
+
+save(tune_costs, file = file.path(optimal_dir, "tune_costs.rda"))
+
+# This is it
+tune_costs %>% slice(1)
+
+# Make the table for the figure
+## Select the most harmonized one
+row_h <- tune_costs %>% slice(1)
+save(row_h, file = file.path(optimal_dir, "vals_balanced.rda"))
+
+# Get the land allocation and the costs
+cbetas_bcep <- c(
+    "biodiversity_cost" = row_h$wB, "carbon_cost" = row_h$wC, 
+    "elephant_cons_index" = row_h$wE, "current_production" = 1/12, 
+    "production_gain" = 1/12, "travel_time" = 1/12)
+
+# land
+land_allocate(
+    inputs_60_std[["potential_production"]], inputs_60_std, 
+    production_need, cbetas_bcep, result_dir,
+    "bcep_balance")
+```

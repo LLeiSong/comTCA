@@ -1,0 +1,384 @@
+---
+title: "Figures in the appendix"
+author: "Lei Song"
+format: html
+editor: visual
+toc: true
+toc-depth: 2
+number-sections: false
+toc-location: left
+output: 
+  html:
+      theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+
+# Load packages
+# remotes::install_github(repo = "floswald/GAEZr")
+library(sf)
+library(here)
+library(dplyr)
+library(stringr)
+library(terra)
+library(ggplot2)
+library(ggfx)
+library(ggpubr)
+library(colorspace)
+library(tidyterra)
+library(rnaturalearth)
+library(stars)
+library(tidyr)
+select <- dplyr::select
+
+# Set paths
+data_dir <- here("data")
+lc_dir <- here("data/landcover")
+agro_dir <- here("data/agriculture")
+ele_data_dir <- here("data/elephant")
+bio_dir <- here("data/biodiversity")
+carbon_dir <- here("data/carbon")
+result_dir <- here("results_add_current")
+optimal_dir <- file.path(result_dir, "optimal")
+trdeoff_dir <- here("data/tradeoff")
+
+# Read globally needed layers
+bry <- read_sf(here("data/geoms/mainland_tanzania.geojson")) %>% 
+    select()
+plant_area <- rast("data/landcover/plant_area_tz.tif")
+crop_mask <- plant_area > 0
+```
+
+## Figure S1
+
+```{r}
+yield_rfd <- rast(file.path(agro_dir, "yield_rfd.tif"))
+yield_rfd <- yield_rfd * resample(crop_mask, yield_rfd, method = "near")
+yields_ds <- rast(file.path(agro_dir, "current_yields_1km.tif"))
+names(yield_rfd) <- names(yields_ds) <- c("Cassava", "Maize", "Pulses", "Rice")
+
+fig_list <- lapply(names(yield_rfd), function(nm){
+    lyr <- yield_rfd[[nm]]
+    lyr2 <- yields_ds[[nm]]
+    lyrs <- c(resample(lyr, lyr2), lyr2)
+    names(lyrs) <- c("5 minutes", "1 km")
+    
+    ggplot() +
+        geom_spatraster(data = lyrs, na.rm = TRUE) +
+        scale_fill_continuous_sequential(
+            name = "Yield (t/ha)",
+            palette = "Plasma", na.value = NA,
+            guide = guide_colourbar(
+                title.position = "top", title.hjust = 0.5)) +
+        geom_sf(data = bry, color = "black", 
+                fill = "transparent", linewidth = 0.6) +
+        facet_wrap(~lyr) +
+        ggtitle(nm) +
+        coord_sf() + theme_void() +
+        theme(text = element_text(size = 12),
+              strip.text.x = element_text(size = 12),
+              plot.title = element_text(hjust = 0.5, size = 12, face="bold"),
+              legend.text = element_text(size = 12),
+              legend.spacing.y = unit(0.1, 'cm'),
+              legend.margin = margin(rep(0, 4)), 
+              legend.key.height = unit(0.4, 'cm'),
+              legend.key.width = unit(0.8, 'cm'),
+              plot.margin = unit(c(0, 0, 0, 0), "cm"),
+              legend.position = "bottom",
+              legend.box = "vertical")
+})
+ggarrange(plotlist = fig_list, nrow = 2, ncol = 2)
+
+ggsave(file.path("docs/figures_appendix", "figureS1.png"),
+       bg = "white",
+       width = 7.5, height = 5.5, dpi = 500)
+```
+
+## Figure S2
+
+```{r}
+yield_rfd <- rast(file.path(agro_dir, "yield_rfd_attainable.tif"))
+yield_rfd <- mask(yield_rfd, bry)
+yields_ds <- rast(file.path(agro_dir, "attainable_yields_1km.tif"))
+yields_ds <- mask(yields_ds, bry)
+names(yield_rfd) <- names(yields_ds) <- c("Cassava", "Maize", "Pulses", "Rice")
+
+fig_list <- lapply(names(yield_rfd), function(nm){
+    lyr <- yield_rfd[[nm]]
+    lyr2 <- yields_ds[[nm]]
+    lyrs <- c(resample(lyr, lyr2), lyr2)
+    names(lyrs) <- c("5 minutes", "1 km")
+    
+    ggplot() +
+        geom_spatraster(data = lyrs / 1000, na.rm = TRUE) +
+        scale_fill_continuous_sequential(
+            name = "Yield (t/ha)",
+            palette = "Plasma", na.value = NA,
+            guide = guide_colourbar(
+                title.position = "top", title.hjust = 0.5)) +
+        geom_sf(data = bry, color = "black", 
+                fill = "transparent", linewidth = 0.6) +
+        facet_wrap(~lyr) +
+        ggtitle(nm) +
+        coord_sf() + theme_void() +
+        theme(text = element_text(size = 12),
+              strip.text.x = element_text(size = 12),
+              plot.title = element_text(hjust = 0.5, size = 12, face="bold"),
+              legend.text = element_text(size = 12),
+              legend.spacing.y = unit(0.1, 'cm'),
+              legend.margin = margin(rep(0, 4)), 
+              legend.key.height = unit(0.4, 'cm'),
+              legend.key.width = unit(0.8, 'cm'),
+              plot.margin = unit(c(0, 0, 0, 0), "cm"),
+              legend.position = "bottom",
+              legend.box = "vertical")
+})
+ggarrange(plotlist = fig_list, nrow = 2, ncol = 2)
+
+ggsave(file.path("docs/figures_appendix", "figureS2.png"),
+       bg = "white",
+       width = 7.5, height = 5.5, dpi = 500)
+```
+
+## Table S1
+
+```{r}
+mod_current_fnames <- list.files(agro_dir, pattern = "rf_model_current",
+                        full.names = TRUE)
+mod_current_evals <- do.call(
+    rbind, lapply(mod_current_fnames, function(fname){
+    load(fname)
+    nm <- gsub("rf_model_current_|rf_model_|.rda", "", basename(fname))
+    model_fit$evaluation$.metrics[[1]] %>% 
+        rename(Metric = .metric, Value = .estimate) %>% 
+        select(Metric, Value) %>% 
+        mutate(Crop = nm, Time = "Current")
+}))
+
+mod_att_fnames <- list.files(agro_dir, pattern = "rf_model_",
+                        full.names = TRUE)
+mod_att_fnames <- setdiff(mod_att_fnames, mod_current_fnames)
+mod_att_evals <- do.call(rbind, lapply(mod_att_fnames, function(fname){
+    load(fname)
+    nm <- gsub("rf_model_current_|rf_model_|.rda", "", basename(fname))
+    model_fit$evaluation$.metrics[[1]] %>% 
+        rename(Metric = .metric, Value = .estimate) %>% 
+        select(Metric, Value) %>% 
+        mutate(Crop = nm, Time = "Attainable",
+               Value = ifelse(Metric == "rsq", Value, Value / 1000))
+}))
+
+mod_evals <- rbind(mod_current_evals, mod_att_evals) %>% 
+    select(Time, Crop, Metric, Value) %>% 
+    pivot_wider(names_from = Metric, values_from = Value)
+save(mod_evals, file = file.path(agro_dir, "mod_evals.rda"))
+```
+
+## Figure S3
+
+```{r}
+fname <- file.path(ele_data_dir, "landscape_utility_1km_integrated.tif")
+suitability <- rast(fname)[["prediction"]]
+pas <- read_sf(file.path(ele_data_dir, "census.geojson")) %>% select()
+
+ggplot() +
+    geom_spatraster(data = suitability, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+            name = "Suitability (0-1)",
+            palette = "Plasma", na.value = NA,
+            guide = guide_colourbar(
+                title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = pas, color = "white", show.legend = FALSE,
+            fill = "transparent", linewidth = 0.4) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, -2, 0, -2), "cm"),
+          legend.position = "bottom",
+          legend.box.just = "left",
+          legend.box = "vertical")
+
+ggsave(file.path("docs/figures_appendix", "figureS3.png"),
+       bg = "white",
+       width = 3.5, height = 4.5, dpi = 500)
+```
+
+## Figure S4
+
+```{r}
+# Calculate species component
+normalize <- function(x, robust = FALSE) {
+    if (robust){
+        stretch(x, minv = 0, maxv = 1, minq = 0, maxq = 0.95)
+    } else {
+        (x - minmax(x)[1]) / (minmax(x)[2] - minmax(x)[1])
+    }
+}
+
+richness_dir <- file.path(bio_dir, "species_richness")
+taxon_group <- c("mammal", "amphibian", "bird", "reptile")
+fnames <- list.files(richness_dir, full.names = TRUE)
+
+richness_fns <- fnames[grepl("weighted", fnames) & !grepl("endemism", fnames)]
+richness <- do.call(
+    c, lapply(richness_fns, function(fn){
+    normalize(rast(fn) %>% mask(bry))}))
+names(richness) <- str_to_title(taxon_group)
+richness$Mean <- richness %>% mean() %>% normalize()
+
+endemism_fns <- fnames[grepl("weighted", fnames) & grepl("endemism", fnames)]
+endemism <- do.call(
+    c, lapply(endemism_fns, function(fn){
+    normalize(rast(fn) %>% mask(bry), TRUE)}))
+names(endemism) <- str_to_title(taxon_group)
+endemism$Mean <- endemism %>% mean() %>% normalize()
+
+g1 <- ggplot() +
+    geom_spatraster(data = richness, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+        name = "Value (0-1)",
+        palette = "Viridis", na.value = NA,
+        guide = guide_colourbar(
+            title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    facet_wrap(~lyr, nrow = 1, ncol = 5) +
+    ggtitle("Species richness") +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, size = 12, face="bold"),
+          legend.text = element_text(size = 12),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          legend.position = "bottom",
+          legend.box = "vertical")
+
+g2 <- ggplot() +
+    geom_spatraster(data = endemism, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+        name = "Value (0-1)",
+        palette = "Viridis", na.value = NA,
+        guide = guide_colourbar(
+            title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    facet_wrap(~lyr, nrow = 1, ncol = 5) +
+    ggtitle("Rarity-weighted species richness") +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, size = 12, face="bold"),
+          legend.text = element_text(size = 12),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          legend.position = "bottom",
+          legend.box = "vertical")
+
+ggarrange(g1, g2, nrow = 2, ncol = 1)
+
+ggsave(file.path("docs/figures_appendix", "figureS4.png"),
+       bg = "white",
+       width = 7.5, height = 5, dpi = 500)
+```
+
+## Figure S5
+
+```{r}
+bhi_msa_bii <- rast(file.path(bio_dir, "bhi_msa_bii.tif"))
+bhi_msa_bii <- mask(bhi_msa_bii, bry)
+
+fig_list <- lapply(names(bhi_msa_bii), function(nm){
+    lyr <- bhi_msa_bii[[nm]]
+    
+    ggplot() +
+    geom_spatraster(data = lyr, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+        name = "Value (0-1)",
+        palette = "Viridis", na.value = NA,
+        guide = guide_colourbar(
+            title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    ggtitle(nm) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+          legend.text = element_text(size = 12),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          legend.position = "bottom",
+          legend.box = "vertical")
+})
+
+ggarrange(plotlist = fig_list, nrow = 1, ncol = 3)
+
+ggsave(file.path("docs/figures_appendix", "figureS5.png"),
+       bg = "white",
+       width = 7, height = 3, dpi = 500)
+```
+
+## Figure s6
+
+```{r}
+abv_bms <- rast(file.path(carbon_dir, "aboveground_biomass.tif"))
+blw_bms <- rast(file.path(carbon_dir, "belowground_biomass.tif"))
+soct_1m <- rast(file.path(carbon_dir, "ocs_1m_sg.tif")) %>% 
+    resample(abv_bms)
+
+carbons <- c(abv_bms, blw_bms, soct_1m)
+names(carbons) <- c("Aboveground biomass", "Belowground biomass", 
+                    "Soil carbon stocks")
+carbons <- mask(carbons, bry)
+
+fig_list <- lapply(names(carbons), function(nm){
+    lyr <- carbons[[nm]]
+    
+    ggplot() +
+    geom_spatraster(data = lyr, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+        name = "Value (t/ha)",
+        palette = "Viridis", na.value = NA,
+        guide = guide_colourbar(
+            title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    ggtitle(nm) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+          legend.text = element_text(size = 12),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          legend.position = "bottom",
+          legend.box = "vertical")
+})
+
+ggarrange(plotlist = fig_list, nrow = 1, ncol = 3)
+
+ggsave(file.path("docs/figures_appendix", "figureS6.png"),
+       bg = "white",
+       width = 7, height = 3, dpi = 500)
+```
+

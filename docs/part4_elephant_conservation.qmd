@@ -64,6 +64,8 @@ In this step, we used circuitscape to simulate the landscape connectivity. We us
 
     cd /path/to/comTCA
     Rscript scripts/circuit_sim.R -n 50
+    
+This part definitely can be better. Plan for next step: right now the values of the pixels only reflect the frequency of being used for movement evaluated over the whole landscape. But how important a pixel is to maintain the necessary connection? We can do some sort of moving-window based wall-to-wall evaluation.
 
 ## Merge two layers
 

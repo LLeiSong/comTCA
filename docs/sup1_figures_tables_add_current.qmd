@@ -34,7 +34,7 @@ select <- dplyr::select
 # Set paths
 lc_dir <- here("data/landcover")
 bio_dir <- here("data/biodiversity")
-result_dir <- here("results_add_current")
+result_dir <- here("results")
 optimal_dir <- file.path(result_dir, "optimal")
 trdeoff_dir <- here("data/tradeoff")
 ```
@@ -212,7 +212,7 @@ tradeoff_inputs <- terra::mask(tradeoff_inputs, pas, inverse = TRUE)
 pas <- st_as_stars(pas) %>% 
     mutate(layer = ifelse(is.nan(layer), NA, layer)) %>% 
     mutate(layer = factor(layer))
-names(pas) <- "Protected areas (with 5 km buffer)"
+names(pas) <- "Protected areas"
 
 # Waters and settlements
 ancillary <- rast(file.path(result_dir, "water_wet_settlement.tif")) %>% 
@@ -227,12 +227,12 @@ coltab(ancillary) <- data.frame(
 ancillary <- st_as_stars(ancillary)
 
 nm_tab <- data.frame(
-    lyr_name = c("current_production", "production_gain", 
+    lyr_name = c("potential_production", "travel_time",
                  "biodiversity_cost", "carbon_cost", 
-                 "elephant_cons_index", "travel_time"),
-    show_name = c("Current production (T)", "Attainable production gain (T)", 
+                 "elephant_cons_index"),
+    show_name = c("Attainable production (T)", "Travel time (mins)",
                   "Proactive biodiversity index (0-1)", "Carbon cost (T)", 
-                  "Elephant migration index (0-1)", "Travel time (mins)"))
+                  "Elephant migration index (0-1)"))
 
 fig_list <- lapply(1:nrow(nm_tab), function(n){
     lyr_nm <- nm_tab[n, "lyr_name"]
@@ -282,7 +282,7 @@ legend_lc <- ggplot() +
         '',
         values = c("grey", "#002de1", "black"), 
         breaks = 1:3,
-        labels = c("Protected areas (with 5 km buffer zone)", 
+        labels = c("Protected areas", 
                    "Wetlands and waterbodies", "Builtup")) +
     theme_void() +
     theme(legend.position = 'bottom',
@@ -297,7 +297,7 @@ fg <- ggarrange(
     labels = letters[1:6], font.label = list(size = 12))
 ggarrange(fg, legend_lc, nrow = 2, heights = c(6, 0.2))
 
-ggsave(file.path("docs/figures_add_current", "figure2.png"),
+ggsave(file.path("docs/figures", "figure2.png"),
        bg = "white",
        width = 7.5, height = 6.4, dpi = 500)
 ```
@@ -356,7 +356,8 @@ plant_area <- plant_area %>% crop(bry) %>% mask(bry)
 plant_area <- plant_area * 100
 reference_area <- plant_area
 values(reference_area) <- 100 * 0.6
-plant_area <- max(plant_area, reference_area)
+plant_area <- reference_area - plant_area
+plant_area[plant_area < 0] <- 0
 
 ecological_costs <- rast(file.path(result_dir, "tradeoff_inputs_60.tif"))
 ecological_costs <- subset(ecological_costs, 1:3)
@@ -367,7 +368,7 @@ sum_cost_abc <- values(ecological_costs_abc) %>%
     as_tibble() %>% 
     mutate(no_units = plant_area, .before = 4)
 names(sum_cost_abc) <- c(
-    letters[1:3], "No of planning units", "Plant area (ha)", 
+    letters[1:3], "No of planning units", "Expand area (ha)", 
     "Biodiveristy cost (0-1)", "Carbon cost (T)", 
     "Elephant migration cost (0-1)")
 
@@ -384,7 +385,7 @@ fg4_hist_list <- lapply(names(sum_cost_abc)[4:8], function(nm){
         g <- ggplot(tbl_no, 
                     aes(x = scenario, y = value, fill = scenario)) +
             ylab(expression(No~of~planning~units~phantom()%*%10^{4}))
-    } else if (nm == "Plant area (ha)") {
+    } else if (nm == "Expand area (ha)") {
         tbl_area <- tbl %>% group_by(scenario) %>% 
             summarise(value = sum(value) / 1000000)
         g <- ggplot(tbl_area, 
@@ -430,9 +431,9 @@ fg <- ggarrange(
 fg_hist <- ggarrange(
     plotlist = fg4_hist_list, nrow = 1, ncol = 5)
 
-ggarrange(fg, legend_lc, fg_hist, nrow = 3, heights = c(3, 0.2, 2))
+ggarrange(fg, legend_lc, NULL, fg_hist, nrow = 4, heights = c(3, 0.2, 0.1, 2))
 
-ggsave(file.path("docs/figures_add_current", "figure3.png"),
+ggsave(file.path("docs/figures", "figure3.png"),
        bg = "white",
        width = 7.5, height = 5, dpi = 500)
 ```
@@ -462,36 +463,36 @@ crop_change <- c(
     crop_current, crop_allo_80, crop_allo_60, crop_allo_60_half) %>% 
     crop(bry) %>% mask(bry)
 names(crop_change) <- c(
-    "Current", "Reallocated_80", 
-    "Reallocated_60", "Reallocated_60_half")
+    "Current", "Expand_80", 
+    "Expand_60", "Expand_60_half")
 crop_change <- st_as_stars(crop_change) %>% 
     split()
 
 crop_change <- crop_change %>% mutate(
-    change_80 = ifelse(Current == 1 & Reallocated_80 == 1, 1,
-                    ifelse(Current == 0 & Reallocated_80 == 0, 2,
-                           ifelse(Current == 0 & Reallocated_80 == 1, 4, 
+    change_80 = ifelse(Current == 1 & Expand_80 == 1, 1,
+                    ifelse(Current == 0 & Expand_80 == 0, 2,
+                           ifelse(Current == 0 & Expand_80 == 1, 4, 
                                   3))),
-    change_60 = ifelse(Current == 1 & Reallocated_60 == 1, 1,
-                    ifelse(Current == 0 & Reallocated_60 == 0, 2,
-                           ifelse(Current == 0 & Reallocated_60 == 1, 4, 
+    change_60 = ifelse(Current == 1 & Expand_60 == 1, 1,
+                    ifelse(Current == 0 & Expand_60 == 0, 2,
+                           ifelse(Current == 0 & Expand_60 == 1, 4, 
                                   3))),
-    change_60_half = ifelse(Current == 1 & Reallocated_60_half == 1, 1,
-                    ifelse(Current == 0 & Reallocated_60_half == 0, 2,
-                           ifelse(Current == 0 & Reallocated_60_half == 1, 4, 
+    change_60_half = ifelse(Current == 1 & Expand_60_half == 1, 1,
+                    ifelse(Current == 0 & Expand_60_half == 0, 2,
+                           ifelse(Current == 0 & Expand_60_half == 1, 4, 
                                   3)))) %>%
     mutate(change_80 = factor(
         change_80, levels = 1:4,
-        labels = c("Cropland to keep", "Non-cropland to keep",
-                   "Cropland to release", "Cropland to expand")),
+        labels = c("Expand current cropland", "Non-cropland to keep",
+                   "Current cropland", "New land to expand")),
         change_60 = factor(
         change_60, levels = 1:4,
-        labels = c("Cropland to keep", "Non-cropland to keep",
-                   "Cropland to release", "Cropland to expand")),
+        labels = c("Expand current cropland", "Non-cropland to keep",
+                   "Current cropland", "New land to expand")),
         change_60_half = factor(
         change_60_half, levels = 1:4,
-        labels = c("Cropland to keep", "Non-cropland to keep",
-                   "Cropland to release", "Cropland to expand")))
+        labels = c("Expand current cropland", "Non-cropland to keep",
+                   "Current cropland", "New land to expand")))
 
 p80 <- ggplot() +
     geom_stars(data = crop_change %>% select(change_80),
@@ -560,7 +561,7 @@ ggarrange(p80, p60, p60_half, ncol = 3,
     labels = letters[1:3], font.label = list(size = 12),
     common.legend = TRUE, legend = "bottom")
 
-ggsave(file.path("docs/figures_add_current", "figure4.png"),
+ggsave(file.path("docs/figures", "figure4.png"),
        bg = "white",
        width = 7.5, height = 3, dpi = 500)
 ```
@@ -586,28 +587,19 @@ areas_60 <- values(areas_60) %>% data.frame() %>%
     na.omit() %>% 
     mutate(class = factor(
         class, levels = 1:4,
-        labels = c("Cropland to keep", "Non-cropland to keep",
-                   "Cropland to release", "Cropland to expand")))
-cropland_to_keep <- areas_60 %>% 
-    filter(class == "Cropland to keep") %>% 
-    pull(area_current) %>% sum()
-cropland_to_release <-  areas_60 %>% 
-    filter(class == "Cropland to release") %>% 
-    pull(area_current) %>% sum()
+        labels = c("Expand current cropland", "Non-cropland to keep",
+                   "Current cropland", "New land to expand")))
+new_land_to_expand <- (100 * 0.6 - (areas_60 %>% 
+    filter(class == "New land to expand") %>% 
+    pull(area_current))) %>% sum()
 cropland_to_expand <- 100 * 0.6 - (areas_60 %>% 
-    filter(class == "Cropland to keep") %>% 
+    filter(class == "Expand current cropland") %>% 
     pull(area_current))
 cropland_to_expand[cropland_to_expand < 0] <- 0
+cropland_to_expand <- sum(cropland_to_expand)
 
-area_add <- (areas_60 %>% 
-    filter(class == "Cropland to expand") %>% nrow()) * 100 * 0.6
-cropland_to_expand <- (area_add - (areas_60 %>% 
-    filter(class == "Cropland to expand") %>% 
-    pull(area_current) %>% sum())) + 
-    sum(cropland_to_expand)
 areas_60 <- data.frame(
-    cropland_to_keep = cropland_to_keep,
-    cropland_to_release = cropland_to_release,
+    new_land_to_expand = new_land_to_expand,
     cropland_to_expand = cropland_to_expand)
 
 # 60% with half yield gain
@@ -617,28 +609,19 @@ areas_60_half <- values(areas_60_half) %>% data.frame() %>%
     na.omit() %>% 
     mutate(class = factor(
         class, levels = 1:4,
-        labels = c("Cropland to keep", "Non-cropland to keep",
-                   "Cropland to release", "Cropland to expand")))
-cropland_to_keep <- areas_60_half %>% 
-    filter(class == "Cropland to keep") %>% 
-    pull(area_current) %>% sum()
-cropland_to_release <-  areas_60_half %>% 
-    filter(class == "Cropland to release") %>% 
-    pull(area_current) %>% sum()
+        labels = c("Expand current cropland", "Non-cropland to keep",
+                   "Current cropland", "New land to expand")))
+new_land_to_expand <- (100 * 0.6 - (areas_60_half %>% 
+    filter(class == "New land to expand") %>% 
+    pull(area_current))) %>% sum()
 cropland_to_expand <- 100 * 0.6 - (areas_60_half %>% 
-    filter(class == "Cropland to keep") %>% 
+    filter(class == "Expand current cropland") %>% 
     pull(area_current))
 cropland_to_expand[cropland_to_expand < 0] <- 0
+cropland_to_expand <- sum(cropland_to_expand)
 
-area_add <- (areas_60_half %>% 
-    filter(class == "Cropland to expand") %>% nrow()) * 100 * 0.6
-cropland_to_expand <- (area_add - (areas_60_half %>% 
-    filter(class == "Cropland to expand") %>% 
-    pull(area_current) %>% sum())) + 
-    sum(cropland_to_expand)
 areas_60_half <- data.frame(
-    cropland_to_keep = cropland_to_keep,
-    cropland_to_release = cropland_to_release,
+    new_land_to_expand = new_land_to_expand,
     cropland_to_expand = cropland_to_expand)
 
 # 80%
@@ -648,28 +631,18 @@ areas_80 <- values(areas_80) %>% data.frame() %>%
     na.omit() %>% 
     mutate(class = factor(
         class, levels = 1:4,
-        labels = c("Cropland to keep", "Non-cropland to keep",
-                   "Cropland to release", "Cropland to expand")))
-cropland_to_keep <- areas_80 %>% 
-    filter(class == "Cropland to keep") %>% 
-    pull(area_current) %>% sum()
-cropland_to_release <-  areas_80 %>% 
-    filter(class == "Cropland to release") %>% 
-    pull(area_current) %>% sum()
-cropland_to_expand <- 100 * 0.8 - (areas_80 %>% 
-    filter(class == "Cropland to keep") %>% 
+        labels = c("Expand current cropland", "Non-cropland to keep",
+                   "Current cropland", "New land to expand")))
+new_land_to_expand <- (100 * 0.6 - (areas_80 %>% 
+    filter(class == "New land to expand") %>% 
+    pull(area_current))) %>% sum()
+cropland_to_expand <- 100 * 0.6 - (areas_80 %>% 
+    filter(class == "Expand current cropland") %>% 
     pull(area_current))
 cropland_to_expand[cropland_to_expand < 0] <- 0
-
-area_add <- (areas_80 %>% 
-    filter(class == "Cropland to expand") %>% nrow()) * 100 * 0.8
-cropland_to_expand <- (area_add - (areas_80 %>% 
-    filter(class == "Cropland to expand") %>% 
-    pull(area_current) %>% sum())) + 
-    sum(cropland_to_expand)
+cropland_to_expand <- sum(cropland_to_expand)
 areas_80 <- data.frame(
-    cropland_to_keep = cropland_to_keep,
-    cropland_to_release = cropland_to_release,
+    new_land_to_expand = new_land_to_expand,
     cropland_to_expand = cropland_to_expand)
 
 # Get areas
@@ -679,7 +652,7 @@ areas <- rbind(areas_80, areas_60, areas_60_half) %>%
 ## Cost calculation
 # 60%
 costs <- rast(file.path(result_dir, "tradeoff_inputs_60.tif"))
-costs <- subset(costs, c(1:3, 7))
+costs <- subset(costs, c(1:3, 6))
 
 fname <- file.path(result_dir, "fut_agro_land_bcep_60.tif")
 costs_abcd <- c(rast(fname), costs)
@@ -699,7 +672,7 @@ costs_60[1, 4] <- mean(sum_cost_abc_60$`Travel time (mins)`)
 
 # 60% with half yield gain
 costs <- rast(file.path(result_dir, "tradeoff_inputs_60_half.tif"))
-costs <- subset(costs, c(1:3, 7))
+costs <- subset(costs, c(1:3, 6))
 
 fname <- file.path(result_dir, "fut_agro_land_bcep_60_half.tif")
 costs_abcd <- c(rast(fname), costs)
@@ -719,7 +692,7 @@ costs_60_half[1, 4] <- mean(sum_cost_abc_60_half$`Travel time (mins)`)
 
 # 80%
 costs <- rast(file.path(result_dir, "tradeoff_inputs_80.tif"))
-costs <- subset(costs, c(1:3, 7))
+costs <- subset(costs, c(1:3, 6))
 
 fname <- file.path(result_dir, "fut_agro_land_bcep_80.tif")
 costs_abcd <- c(rast(fname), costs)
@@ -740,8 +713,8 @@ costs_80[1, 4] <- mean(sum_cost_abc_80$`Travel time (mins)`)
 # Gather all values
 vals <- cbind(areas, rbind(costs_80, costs_60, costs_60_half)) %>% 
     as_tibble()
-names(vals)[1:4] <- c("Cropland to keep (ha)", "Cropland to release (ha)", 
-                      "Cropland to expand (ha)", "Scenario")
+names(vals)[1:3] <- c("New land to expand (ha)", "Cropland to expand (ha)", 
+                      "Scenario")
 write.csv(vals, file.path(result_dir, "table2_values_scenario.csv"),
           row.names = FALSE)
 
@@ -854,7 +827,7 @@ fg <- ggplot() +
 
 ggarrange(fg, legend_lc, NA, nrow = 3, heights = c(6, 1, 0.8))
 
-ggsave(file.path("docs/figures_add_current", "figure5_2.png"),
+ggsave(file.path("docs/figures", "figure5_2.png"),
        bg = "white",
        width = 3.75, height = 3.75, dpi = 500)
 ```
@@ -864,7 +837,7 @@ Calculate the costs and areas
 ```{r}
 # Cost
 costs <- rast(file.path(result_dir, "tradeoff_inputs_60.tif"))
-costs <- subset(costs, c(1:3, 7))
+costs <- subset(costs, c(1:3, 6))
 
 fname <- file.path(result_dir, "fut_agro_land_bcep_balance.tif")
 costs_abcd <- c(rast(fname), costs)
@@ -893,7 +866,8 @@ plant_area <- plant_area %>% crop(bry) %>% mask(bry)
 plant_area <- plant_area * 100
 reference_area <- plant_area
 values(reference_area) <- 100 * 0.6
-plant_area <- max(plant_area, reference_area)
+plant_area <-reference_area - plant_area
+plant_area[plant_area < 0] <- 0
 
 plant_area_abc <- c(rast(fname), plant_area)
 plant_area_abc <- values(plant_area_abc) %>% na.omit() %>% data.frame()

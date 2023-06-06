@@ -807,6 +807,21 @@ writeRaster(
     production_to_expansion_80, 
     file.path(agro_dir, "production_to_expansion_80.tif"))
 
+## 80% area for expansion for each planning area
+production_to_expansion_80_half <- do.call(c, lapply(crops, function(crop){
+    # attainable gaps over the whole region
+    # only consider 80% of a planning unit to leave space for roads/houses, etc.
+    attainable_yield <- atn_yields_half[crop]
+    exp_new <- mask(attainable_yield * 100 * 0.8, crop_mask, inverse = TRUE)
+    exp_old_area <- 100 * 0.8 - plant_area
+    exp_old_area[exp_old_area < 0] <- 0 # Keep it if the orig area is higher
+    exp_old <- attainable_yield * exp_old_area
+    sum(exp_new, exp_old, na.rm = TRUE)
+}))
+writeRaster(
+    production_to_expansion_80_half, 
+    file.path(agro_dir, "production_to_expansion_80_half.tif"))
+
 ## 60% area for expansion for each planning area
 production_to_expansion_60 <- do.call(c, lapply(crops, function(crop){
     # attainable gaps over the whole region
@@ -872,6 +887,13 @@ overall_expansion_80[overall_expansion_80 == 0] <- NA
 writeRaster(
     overall_expansion_80, file.path(agro_dir, "production_expans_80.tif"))
 
+overall_expansion_80_half <- mean(
+    production_to_expansion_80_half, na.rm = TRUE)
+overall_expansion_80_half[overall_expansion_80_half == 0] <- NA
+writeRaster(
+    overall_expansion_80_half, 
+    file.path(agro_dir, "production_expans_80_half.tif"))
+
 overall_expansion_60 <- mean(production_to_expansion_60, na.rm = TRUE)
 overall_expansion_60[overall_expansion_60 == 0] <- NA
 writeRaster(
@@ -924,6 +946,22 @@ overall_future_prod_60 <- sum(overall_current, overall_prod_add_60,
 writeRaster(
     overall_future_prod_60, 
     file.path(trdeoff_dir, "overall_future_production_60.tif"))
+
+### 80% with half yield gain
+overall_prod_add_80_half <- sum(
+    overall_increase_half, overall_expansion_80_half, 
+    na.rm = TRUE)
+overall_prod_add_80_half <- mask(crop(overall_prod_add_80_half, bry), bry)
+writeRaster(
+    overall_prod_add_80_half, 
+    file.path(trdeoff_dir, "overall_prod_add_80_half.tif"))
+
+overall_future_prod_80_half <- sum(
+    overall_current, overall_prod_add_80_half, 
+    na.rm = TRUE)
+writeRaster(
+    overall_future_prod_80_half, 
+    file.path(trdeoff_dir, "overall_future_production_80_half.tif"))
 
 ### 60% with half yield gain
 overall_prod_add_60_half <- sum(

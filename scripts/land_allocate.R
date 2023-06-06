@@ -25,7 +25,10 @@ land_allocate <- function(
     # Get the decision table
     decision_mat <- values(c(weights, potential_production)) %>% 
         data.frame() %>% mutate(cell_id = 1:nrow(.)) %>% 
-        na.omit() %>% arrange(-sum)
+        na.omit() %>% 
+        # remove zero gain pixels
+        filter(production_gain_exp > 0.000001) %>%
+        arrange(-sum)
     
     # Match the target
     prod_to_catch <- production_need

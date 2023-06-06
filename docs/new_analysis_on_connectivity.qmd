@@ -1,0 +1,163 @@
+---
+title: "New Analysis on landscape connectivity"
+author: "Lei Song"
+date: "1/4/2023"
+toc: true
+toc-depth: 2
+number-sections: false
+toc-location: left
+output: 
+  html:
+      theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+```
+
+## Introduction
+
+To get a new plan of landscape connectivity analysis for the tradeoff model.
+
+## Review on the landscape connectivity index
+
+Even today, there are two types of analysis on landscape connectivity. One is a single index value that characterize the degree of connectivity of the whole landscape currently. This is useful for the overall analysis and management. Another one is the operational connectivity analysis that can identify the most critical landscape elements for the maintenance of overall connectivity. A certain index can be used to evaluate the relative ranking of landscape elements by their contribution to the overall connectivity:
+
+$$dI(\%) = \frac{I - I'}{I} \times 100$$
+where $I$ is the index value when the landscape element is present in the landscape and $I'$ is the index value after removal of that landscape element.
+
+Based on their definition, the second type is more suitable for this project, as we want to know how importance one planning unit is to maintain the overall connectivity. The difference is that we want to focus on the passage areas rather than habitat patches. We also need to select an index to represent $I$.
+
+The **probability of connectivity index (PC)** in Conefor is defined as the probability that two animals randomly placed within the landscape fall into habitat areas that are reachable from each other (interconnected) given a set of $n$ habitat patches and the connections ($p_{ij}$) among them. It is calculated as follows:
+
+$$PC = \frac{\sum_{i=1}^n\sum_{j=1}^na_{i}a_{j}p_{ij}^*}{A_{L}^2}$$
+where $a_{i}$ and $a_{j}$ could be any attributes (e.g. areas) of the habitat patches $i$ and $j$. $p_{ij}^*$ is the maximum probability of all possible paths between patches $i$ and $j$.
+
+**Other useful index** are *survival probability* based on effective connectivity. The tools can be used are `ConScape` Julia pacakge, `Makurhini` R package, and `Conefor` command line. 
+$p_{ij}$ is typically randomized least cost path or circuitscape used in these tools. Now one issue is that it may take forever to calculate each pixel and the effect of one pixel to the connectivity of the whole landscape may not be obvious or even not reliable. So a hierarchical structure may be a good starting point.
+
+## Side thoughts
+
+After this project, then we can do an analysis like "Critical unprotected natural lands to maintain functional connectivity of the world's protected areas".
+
+## Experiments
+
+Use `ConScape` to implement a simplified method to do a pilot experiment for the proposed idea. Iteratively calculate the $dI$ used the $p_{ij}$ calculated from least cost path. The result definitely highlighted areas that are more important to maintain the overall connectivity.
+
+```{r}
+library(here)
+library(terra)
+library(sf)
+library(dplyr)
+
+test_dir <- here("data/test")
+ele_data_dir <- here("data/elephant")
+fname <- file.path(ele_data_dir, "landscape_utility_1km_integrated.tif")
+suitability <- rast(fname)[["prediction"]]
+suitability <- aggregate(suitability, fact = 30)
+
+# Write out asc file
+suitability[is.na(suitability)] <- -9999
+writeRaster(suitability, file.path(test_dir, 'mov_prob_30km.asc'),
+            wopt = list(NAflag = -9999))
+writeRaster(suitability, file.path(test_dir, 'hab_qual_30km.asc'),
+            wopt = list(NAflag = -9999))
+
+# IPC
+ipc <- read.delim("data/test/ipc.txt", header = FALSE)
+ipc_rst <- suitability
+values(ipc_rst) <- ipc
+writeRaster(ipc_rst, "data/test/ipc.tif")
+writeRaster(suitability, "data/test/suit.tif")
+
+# Exclude protected areas
+pas <- read_sf(
+    file.path("data/protected_area", "WDPA_WDOECM_Jan2023_Public_TZA",
+              "WDPA_WDOECM_Jan2023_Public_TZA.gdb"),
+    layer = "WDPA_WDOECM_poly_Jan2023_TZA")
+pas <- pas %>% 
+    select(WDPAID, NAME, DESIG) %>% 
+    rename(Geometry = SHAPE) %>% 
+    filter(!DESIG %in% c("Marine Reserve", "Marine Park"))
+pas <- rasterize(pas, suitability, values = 1)
+pas <- pas %>% crop(bry) %>% mask(bry)
+
+suitability <- mask(suitability, pas, inverse = TRUE)
+ipc_rst <- mask(ipc_rst, pas, inverse = TRUE)
+writeRaster(ipc_rst, "data/test/ipc_no_pa.tif")
+writeRaster(suitability, "data/test/suit_no_pa.tif")
+
+# Original least cost path
+func_lc <- read.delim("data/test/func_lc.txt", header = FALSE)
+orig_lc <- suitability
+values(orig_lc) <- func_lc
+writeRaster(orig_lc, "data/test/orig_lc.tif")
+```
+
+`ConScape` code:
+
+```{julia}
+# Import packages
+using ConScape
+using SparseArrays
+using Statistics
+using Plots
+using DelimitedFiles
+
+# Load data
+datadir = "/Users/leisong/Dropbox/research/comTCA/data/test";
+outdir = datadir;
+mov_prob, meta_p = ConScape.readasc(joinpath(datadir, "mov_prob_30km.asc"));
+hab_qual, meta_q = ConScape.readasc(joinpath(datadir, "hab_qual_30km.asc"));
+non_matches = findall(xor.(isnan.(mov_prob), isnan.(hab_qual)))
+mov_prob[non_matches] .= 1e-20
+hab_qual[non_matches] .= 1e-20
+
+# Get suitable pixels
+pixels = findall(!isnan, mov_prob)
+# Define dI
+ipc = zeros((size(mov_prob)[1], size(mov_prob)[2]))
+
+# Calculate the original PC
+adjacency_matrix = ConScape.graph_matrix_from_raster(mov_prob)
+g = ConScape.Grid(size(mov_prob)...,
+		affinities=adjacency_matrix,
+		qualities=hab_qual,
+		costs=ConScape.mapnz(x -> -log(x), adjacency_matrix))
+func_lc = ConScape.connected_habitat(g, connectivity_function=
+		ConScape.least_cost_distance, distance_transformation=x -> exp(-x/40))
+CL = sum(filter(x -> !isnan(x), func_lc))
+# PC=CL/sum(map(x -> isnan(x) ? 0 : 1, func_lc))^2
+
+# Loop over all suitable pixels
+for pixel in pixels
+	# Set the select pixel as NA
+	mov_prob_val = mov_prob[pixel]
+	hab_quak_val = hab_qual[pixel]
+	mov_prob[pixel] = NaN
+	hab_qual[pixel] = NaN
+
+	# Calculate the grid
+	adjacency_matrix = ConScape.graph_matrix_from_raster(mov_prob)
+	g = ConScape.Grid(size(mov_prob)...,
+		affinities=adjacency_matrix,
+		qualities=hab_qual,
+		costs=ConScape.mapnz(x -> -log(x), adjacency_matrix))
+
+	# Calculate CL
+	func_lc = ConScape.connected_habitat(g, connectivity_function=
+		ConScape.least_cost_distance, distance_transformation=x -> exp(-x/40));
+	CL_exclude = sum(filter(x -> !isnan(x), func_lc))
+	ipc_this = (CL - CL_exclude) / CL
+	ipc[pixel] = ipc_this
+
+	# Change back
+	mov_prob[pixel] = mov_prob_val
+	hab_qual[pixel] = hab_quak_val
+end
+
+# Save out the result
+writedlm(joinpath(datadir, "ipc.txt"), ipc)
+writedlm(joinpath(datadir, "func_lc.txt"), func_lc)
+```
+

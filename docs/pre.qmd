@@ -1,0 +1,87 @@
+---
+title: "Tradeoff analysis in Tanzania"
+subtitle: "Reconciling agricultural expansion and wild nature with a focus on functional connectivity"
+author: Lei Song
+institute: Arizona State University
+date: today
+embed-resources: false
+format: 
+    revealjs:
+        fontsize: 26pt
+        slide-number: true
+        show-slide-number: all
+        auto-stretch: true
+bibliography: references.bib
+---
+
+```{r setup, include=FALSE}
+sysfonts::font_add_google("Alegreya Sans", "Alegreya Sans")
+# "Noto Serif Georgian"
+showtext::showtext_auto()
+```
+
+## Introduction
+
+Under rapidly increasing human populations, the objective of this work is to determine the optimal locations for **future cropland expansion** that balance food production, the impacts on functional habitat connectivity, and the costs associated with biodiversity and carbon.
+
+This project uses the same [agroEcoTradeoff](https://github.com/agroimpacts/agroEcoTradeoff) tradeoff analysis model. The model was initially introduced by Estes et al. [-@estes2016] and has since been specifically evaluated for the biodiversity index component by Crawford et al. [-@crawford2021].
+
+## Difference in this work
+
+-   **Treat planning units differently:** Consider planning units can be partially covered by current cropland.
+-   **Simplification of crop production evaluation:** The evaluation of crop production was simplified by utilizing the average yield of multiple crops.
+-   **Inclusion of transport cost in crop production evaluation:** The evaluation of crop production in this work incorporates the consideration of transport cost.
+-   **Integration of landscape connectivity evaluation:** Additionally, the assessment of functional landscape connectivity has been incorporated into the analysis.
+
+## Progress
+
+::: columns
+::: {.column width="50%"}
+![](figures/concept.png)
+:::
+
+::: {.column width="50%"}
+![](figures/unit.png)
+:::
+:::
+
+Biodiversity cost: $BIp_{i} = b_{i} \times c_{i}$, $b_{i} = S_{i} + E_{i}$.
+
+where $c = BHI$, $S = sqrt(richness * endemism)$ and $E = mean (MSA, BII)$ [@soto-navarro2020].
+
+## Progress
+
+Functional connectivity: arithmetic mean of importance and uniqueness of planning units to maintain functional connectivity of the whole landscape.
+
+- Importance: $dI(\%) = \frac{I - I'}{I} \times 100$ and $PC = \frac{\sum_{i=1}^n\sum_{j=1}^na_{i}a_{j}p_{ij}^*}{A_{L}^2}$.
+- Uniqueness: Circuitscape result.
+
+## Figures
+
+![](figures/figure2.png)
+
+## Connectivity
+
+::: columns
+::: {.column width="40%"}
+![**Connection uniqueness**](figures/connec_uniqueness.png)
+:::
+
+::: {.column width="40%"}
+![**Connection importance (An experiment)**](figures/connec_imp.png)
+:::
+:::
+
+## Discussion
+
+**Q1:** Should we consider the surrounding areas like the calculation of transport cost?
+
+**Q2:** Should we consider all migratory large mammals to make the result more general?
+
+**As a reviewer, what would be your criticisms, comments, or suggestions regarding the analysis design?**
+
+## Other questions
+
+As an experienced user, what are your thoughts and suggestions on the package if we intend to release it officially on CRAN eventually?
+
+## References

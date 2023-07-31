@@ -319,10 +319,11 @@ forest_fill_neighbor <- function(src_path, landcover_path,
     # Fill
     eq_string <- "(A==1) * B + (A==0) * C"
     options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
-    command <- sprintf('gdal_calc.py -A %s -B %s -C %s --outfile=%s --calc="%s" %s',
-                       fname_tmp, fname_for_fill_tmp_rsp, src_path, 
-                       here('data/landcover/forest_filled.tif'),
-                       eq_string, options_int)
+    command <- sprintf(
+        'gdal_calc.py -A %s -B %s -C %s --outfile=%s --calc="%s" %s',
+        fname_tmp, fname_for_fill_tmp_rsp, src_path, 
+        here('data/landcover/forest_filled.tif'),
+        eq_string, options_int)
     system(command)
     
     ## Fill the rest pixels with 200:Forest
@@ -400,25 +401,48 @@ system(command)
 # Fill
 eq_string <- "A * ((B!=0) * B + (B==0) * C)"
 options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
-command <- sprintf('gdal_calc.py -A %s -B %s -C %s --outfile=%s --calc="%s" %s',
-                   here('data/landcover/sgb_mask.tif'), 
-                   here('data/landcover/200_300_400_1402.tif'), 
-                   here('data/landcover/200_300_400_1402_filled_resample.tif'), 
-                   here('data/landcover/200_300_400_1402_full.tif'),
-                   eq_string, options_int)
+command <- sprintf(
+    'gdal_calc.py -A %s -B %s -C %s --outfile=%s --calc="%s" %s',
+    here('data/landcover/sgb_mask.tif'), 
+    here('data/landcover/200_300_400_1402.tif'), 
+    here('data/landcover/200_300_400_1402_filled_resample.tif'), 
+    here('data/landcover/200_300_400_1402_full.tif'),
+    eq_string, options_int)
 system(command)
 
 ## Because the majority is Savanna, so all remaining area will be signed as
 ## dry savanna.
 eq_string <- "(D!=255) * ((A!=0) * A + (A==0) * ((C!=0) * C + (C==0) * 201))"
 options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
-command <- sprintf('gdal_calc.py -A %s -B %s -C %s -D %s --outfile=%s --calc="%s" %s',
-                   here('data/landcover/100_500_1400_no_1402.tif'), # go first
-                   here('data/landcover/sgb_mask.tif'), 
-                   here('data/landcover/200_300_400_1402_full.tif'), 
-                   landcover_geo_fname,
-                   here('data/landcover/habitat_tz_refined.tif'), 
-                   eq_string, options_int)
+command <- sprintf(
+    'gdal_calc.py -A %s -B %s -C %s -D %s --outfile=%s --calc="%s" %s',
+    here('data/landcover/100_500_1400_no_1402.tif'), # go first
+    here('data/landcover/sgb_mask.tif'), 
+    here('data/landcover/200_300_400_1402_full.tif'), 
+    landcover_geo_fname,
+    here('data/landcover/habitat_tz_refined_messy_coastal.tif'), 
+    eq_string, options_int)
+system(command)
+
+# To mask out the oceanic areas
+eq_string <- "logical_and(B!=0, logical_or(B<900, B>=1400)) * A"
+options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
+command <- sprintf(
+    'gdal_calc.py -A %s -B %s --outfile=%s --calc="%s" %s',
+    here('data/landcover/habitat_tz_refined_messy_coastal.tif'),
+    habitat_tz,
+    here('data/habitats/habitat_tz_refined.tif'), 
+    eq_string, options_int)
+system(command)
+
+# Finally, add the Rocky areas back, mainly peak of Meru, Kilimanjaro
+eq_string <- "(B==600) * B + (B!=600) * A"
+options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
+command <- sprintf(
+    'gdal_calc.py -A %s -B %s --outfile=%s --calc="%s" %s',
+    here('data/habitats/habitat_tz_refined.tif'),
+    habitat_tz, here('data/habitats/habitat_tz_refined_final.tif'), 
+    eq_string, options_int)
 system(command)
 
 # The final habitat type map of Tanzania is fully refined and ready to be used.

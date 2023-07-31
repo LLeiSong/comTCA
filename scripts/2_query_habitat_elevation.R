@@ -52,13 +52,50 @@ query_species_info <- function(sci_name){
          elevation_lower = elevation_lower)}
 
 # Make the query
+## NOTE: Red List API may be sensitive to a large number of queries
 mammals_info <- lapply(mammals$sci_name, query_species_info)
 amphibians_info <- lapply(amphibians$sci_name, query_species_info)
 birds_info <- lapply(birds$sci_name, query_species_info)
 reptiles_info <- lapply(reptiles$sci_name, query_species_info)
 
+# Fix some problematic reptiles using either similar or upper class species
+prob_reptiles <- unlist(sapply(reptiles_info, function(info){
+    if (length(info$habitat) == 0) return(info$name)})) %>% 
+    data.frame(gard_name = .)
+
+# Manually search these names across different website, like Red list, GBIF
+prob_reptiles <- prob_reptiles %>% 
+    mutate(red_name = c(
+        "Adolfus jacksoni", "Kinixys belliana", 
+        "Kinixys erosa", "Kinixys spekii", 
+        "Kinixys zombensis", "Kinyongia msuyae",
+        " Mochlus hinkeli", "Lygodactylus tsavoensis",
+        "Mecistops cataphractus", "Panaspis wahlbergii",
+        "Pelomedusa kobe", "Pelomedusa neumanni",
+        "Pelomedusa galeata", "Pelusios castanoides",
+        "Pelusios gabonensis", "Pelusios rhodesianus",
+        "Pelusios sinuatus", "Pelusios subniger",
+        "Pelusios williamsi", "Psammophis mossambicus",
+        "Kladirostratus acutus", "Psammophylax variabilis",
+        "Trachylepis margaritifer"))
+
+# Try to update the problematic species
+for (i in 1:length(reptiles_info)){
+    this_species <- reptiles_info[[i]]
+    if (length(this_species$habitats) == 0){
+        names_species <- prob_reptiles %>% 
+            filter(gard_name == this_species$name)
+        info <- query_species_info(names_species$red_name)
+        
+        reptiles_info[[i]] <- info
+        reptiles_info[[i]]$name <- this_species$name
+    }
+}
+
 # Save out
 save(mammals_info, file = file.path(species_info_dir, "mammals_info.rda"))
 save(amphibians_info, file = file.path(species_info_dir, "amphibians_info.rda"))
 save(birds_info, file = file.path(species_info_dir, "birds_info.rda"))
+
+# WARNING: There are some species without species and elevation records
 save(reptiles_info, file = file.path(species_info_dir, "reptiles_info.rda"))

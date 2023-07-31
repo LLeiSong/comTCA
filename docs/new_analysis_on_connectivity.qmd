@@ -40,9 +40,13 @@ $p_{ij}$ is typically randomized least cost path or circuitscape used in these t
 
 After this project, then we can do an analysis like "Critical unprotected natural lands to maintain functional connectivity of the world's protected areas".
 
+"Diverse impacts of cropland expansion on biodiversity reduction".
+
+"Impacts of air flights on bird migration".
+
 ## Experiments
 
-Use `ConScape` to implement a simplified method to do a pilot experiment for the proposed idea. Iteratively calculate the $dI$ used the $p_{ij}$ calculated from least cost path. The result definitely highlighted areas that are more important to maintain the overall connectivity.
+Use `ConScape` to implement a simplified method to do a pilot experiment for the proposed idea. Interactively calculate the $dI$ used the $p_{ij}$ calculated from least cost path. The result definitely highlighted areas that are more important to maintain the overall connectivity.
 
 ```{r}
 library(here)
@@ -161,3 +165,31 @@ writedlm(joinpath(datadir, "ipc.txt"), ipc)
 writedlm(joinpath(datadir, "func_lc.txt"), func_lc)
 ```
 
+## Discussion feedbacks
+
+After meeting with Chris and Lyndon, here are some thoughts and plans to improve the analysis:
+
+- Try refining the habitat type map based on our own land cover map. There is a mismatch between land cover types and habitat types, so I need to test it first to assess its effectiveness.
+
+- Explore other biodiversity indices we can use and the possibility of using "Zonation" as an alternative method to describe biodiversity. Additionally, we should conduct a simple sensitivity analysis (included in the supplementary materials) using different biodiversity indices to justify the selection made in the manuscript.
+
+- It would be beneficial to include a few other species besides elephants to enhance the generality and representativeness of the connectivity analysis.
+
+- Improve crop yield estimation and find a better way to consider attainable yield (better than simply average all yields).
+
+- Calculate a new functional connectivity index, which will be the novel aspect of the analysis.
+
+- In terms of the package, find a better name for it and make it more flexible for inputs and a good documentation.
+
+## Landscape connectivity analysis tools
+
+- Circuitscape: model corridors and predict connectivity. It considers resistance of movement.
+- Condatis: identify the best locations for habitat creation and restoration. Online.
+- Conefor: Quantify the importance of **habitat areas and links** for the maintenance of landscape connectivity. It uses the probability of connectivity.
+- ConScape: Get metrics for connected habitat and movement flow. Include some other methods as well.
+- Graphab: Very similar to Circuitscape.
+- HexSim: can evaluate landscape connectivity. *Have to try it out*.
+- **Marxan Connect**: Include "connectivity" in the protected area network planning.
+- Zonation
+- Makurhini: Conefor + landscape heterogeneity
+- 

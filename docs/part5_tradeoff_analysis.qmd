@@ -1,7 +1,7 @@
 ---
-title: "Part5: tradeoff analysis"
+title: "Part5: tradeoff analysis add current production as a factor"
 author: "Lei Song"
-editor: visual
+editor: source
 toc: true
 toc-depth: 2
 number-sections: false
@@ -38,6 +38,12 @@ In this step, we masked out waterbodies, settlement, and protected areas from al
 Also, we only considered permanent and large enough waterbodies mainly because of the lack of data. This may overestimate the land can expand, not too much though.
 
 We separated the protected area mask from the other two in order to consider clearing agriculture within protected areas.
+
+So, the structure should be modified by:
+
+-   Deduct the production growth from intensification of current croplands.
+-   Mask out the planning units that have existing cropland beyond the maximum planting areas.
+-   Select the rest pixels.
 
 ```{r}
 sf_use_s2(FALSE)
@@ -77,11 +83,6 @@ pas <- pas %>%
     select(WDPAID, NAME, DESIG) %>% 
     rename(Geometry = SHAPE) %>% 
     filter(!DESIG %in% c("Marine Reserve", "Marine Park"))
-
-# Add buffer zone, 5km, to non-forest PAs
-pas <- pas %>% filter(str_detect(DESIG, "Forest|forest")) %>% 
-    rbind(pas %>% filter(!str_detect(DESIG, "Forest|forest")) %>% 
-                             st_buffer(0.008333333 * 5))
 ```
 
 ## Format the input layers
@@ -89,11 +90,18 @@ pas <- pas %>% filter(str_detect(DESIG, "Forest|forest")) %>%
 ```{r}
 # Read layers
 fnames <- list.files(trdeoff_dir, full.names = TRUE)
-fnames <- fnames[!str_detect(fnames, "mean_attainable_yield")]
+fnames <- fnames[!str_detect(fnames, "area|increase")]
 template <- rast(fnames[1]) %>% crop(bry) %>% mask(bry)
 
 fnames_80 <- fnames[!str_detect(fnames, "60")]
+fnames_80 <- fnames_80[!str_detect(fnames_80, "_half")]
 inputs_80 <- do.call(c, lapply(fnames_80, function(fname){
+    rast(fname) %>% crop(bry) %>% mask(bry)
+}))
+
+fnames_80_half <- fnames[!str_detect(fnames, "60")]
+fnames_80_half <- fnames_80_half[-c(2, 7)]
+inputs_80_half <- do.call(c, lapply(fnames_80_half, function(fname){
     rast(fname) %>% crop(bry) %>% mask(bry)
 }))
 
@@ -104,16 +112,17 @@ inputs_60 <- do.call(c, lapply(fnames_60, function(fname){
 }))
 
 fnames_60_half <- fnames[!str_detect(fnames, "80")]
-fnames_60_half <- fnames_60_half[-c(5, 7)]
+fnames_60_half <- fnames_60_half[-c(2, 7)]
 inputs_60_half <- do.call(c, lapply(fnames_60_half, function(fname){
     rast(fname) %>% crop(bry) %>% mask(bry)
 }))
 
-nms <- c(
-    "biodiversity_cost", "carbon_cost", 
-    "elephant_cons_index", "potential_production", 
-    "production_gain", "travel_time")
+nms <- c("potential_yield",
+         "biodiversity_cost", "carbon_cost", 
+         "elephant_cons_index", "production_gain_exp", 
+         "travel_time")
 names(inputs_80) <- nms
+names(inputs_80_half) <- nms
 names(inputs_60) <- nms
 names(inputs_60_half) <- nms
 
@@ -127,13 +136,15 @@ writeRaster(msk, file.path(result_dir, "water_settlement_mask.tif"))
 msk <- msk %>% crop(bry) %>% mask(bry)
 
 ## PAs
-pas <- rasterize(pas, template, values = 1)
+pas <- rasterize(vect(pas), template, values = 1)
 writeRaster(pas, file.path(result_dir, "pas_mask.tif"))
 pas <- pas %>% crop(bry) %>% mask(bry)
 
 ## Mask out waters and settlements from inputs
 inputs_80 <- mask(inputs_80, msk, inverse = TRUE)
 writeRaster(inputs_80, file.path(result_dir, "tradeoff_inputs_80.tif"))
+inputs_80_half <- mask(inputs_80_half, msk, inverse = TRUE)
+writeRaster(inputs_80_half, file.path(result_dir, "tradeoff_inputs_80_half.tif"))
 inputs_60 <- mask(inputs_60, msk, inverse = TRUE)
 writeRaster(inputs_60, file.path(result_dir, "tradeoff_inputs_60.tif"))
 inputs_60_half <- mask(inputs_60_half, msk, inverse = TRUE)
@@ -160,49 +171,42 @@ The spatial planning unit is 1 square km (100 ha). The evaluation unit is per pr
 ```{r}
 # Mask out PAs
 inputs_80 <- mask(inputs_80, pas, inverse = TRUE)
+inputs_80_half <- mask(inputs_80_half, pas, inverse = TRUE)
 inputs_60 <- mask(inputs_60, pas, inverse = TRUE)
 inputs_60_half <- mask(inputs_60_half, pas, inverse = TRUE)
 
+# Convert to efficiency based
 # Normalize
-inputs_80_std <- do.call(c, lapply(names(inputs_80), function(name){
-    lyr <- inputs_80[[name]]
-    if (name == "production_gain") {
-        lyr <- stretch(lyr, minv = 0, maxv = 1)
-    } else if (name == "potential_production") {
-        lyr <- lyr
-    } else {
-        lyr <- 1 - stretch(lyr, minv = 0, maxv = 1)
-    }
-    lyr
-}))
+input_norm <- function(inputs){
+    stopifnot(identical(names(inputs), nms))
+    do.call(c, lapply(names(inputs), function(name){
+        lyr <- inputs[[name]]
+        if (name %in% c("potential_yield")) {
+            lyr <- 1 - stretch(1 / lyr, minv = 0, maxv = 1)
+        } else if (name == "production_gain_exp") {
+            lyr <- lyr
+        } else {
+            lyr <- 1 - stretch(lyr / inputs_80[["potential_yield"]], 
+                               minv = 0, maxv = 1)
+        }
+        lyr
+    }))
+}
 
-inputs_60_std <- do.call(c, lapply(names(inputs_60), function(name){
-    lyr <- inputs_60[[name]]
-    if (name == "production_gain") {
-        lyr <- stretch(lyr, minv = 0, maxv = 1)
-    } else if (name == "potential_production") {
-        lyr <- lyr
-    } else {
-        lyr <- 1 - stretch(lyr, minv = 0, maxv = 1)
-    }
-    lyr
-}))
+inputs_80_std <- input_norm(inputs_80)
 
-inputs_60_half_std <- do.call(c, lapply(names(inputs_60_half), function(name){
-    lyr <- inputs_60_half[[name]]
-    if (name == "production_gain") {
-        lyr <- stretch(lyr, minv = 0, maxv = 1)
-    } else if (name == "potential_production") {
-        lyr <- lyr
-    } else {
-        lyr <- 1 - stretch(lyr, minv = 0, maxv = 1)
-    }
-    lyr
-}))
+inputs_80_half_std <- input_norm(inputs_80_half)
+
+inputs_60_std <- input_norm(inputs_60)
+
+inputs_60_half_std <- input_norm(inputs_60_half)
 
 # Save out
 writeRaster(
     inputs_80_std, file.path(result_dir, "tradeoff_inputs_80_std.tif"),
+    overwrite = TRUE)
+writeRaster(
+    inputs_80_half_std, file.path(result_dir, "tradeoff_inputs_80_half_std.tif"),
     overwrite = TRUE)
 writeRaster(
     inputs_60_std, file.path(result_dir, "tradeoff_inputs_60_std.tif"),
@@ -228,60 +232,248 @@ source("scripts/land_allocate.R")
 ## Cassava: 1770608 tons
 ## Beans: 659473 tons
 production_need <- 50000000
+prod_intense <- rast(file.path(trdeoff_dir, "production_to_increase.tif"))
+prod_intense <- sum(values(prod_intense), na.rm = TRUE)
+
+prod_intense_half <- rast(file.path(trdeoff_dir, "production_to_increase_half.tif"))
+prod_intense_half <- sum(values(prod_intense_half), na.rm = TRUE)
 
 # Equally consider all factors
 cbetas_bcep <- c(
-    "biodiversity_cost" = 1/5, "carbon_cost" = 1/5, 
-    "elephant_cons_index" = 1/5, "production_gain" = 1/5, 
-    "travel_time" = 1/5)
+    "biodiversity_cost" = 1/4, "carbon_cost" = 1/4, 
+    "elephant_cons_index" = 1/4, 
+    "potential_yield" = 1/8, "travel_time" = 1/8)
 
 # 80 scenario
 land_allocate(
-    inputs_80_std[["potential_production"]], inputs_80_std, 
-    production_need, cbetas_bcep, result_dir,
+    inputs_80_std[["production_gain_exp"]], inputs_80_std, 
+    production_need - prod_intense, cbetas_bcep, result_dir,
     "bcep_80")
 # 60 scenario
 land_allocate(
-    inputs_60_std[["potential_production"]], inputs_60_std, 
-    production_need, cbetas_bcep, result_dir,
+    inputs_60_std[["production_gain_exp"]], inputs_60_std, 
+    production_need - prod_intense, cbetas_bcep, result_dir,
     "bcep_60")
 # 60 with no production gain scenario
+## failed
 land_allocate(
-    inputs_60_half_std[["potential_production"]], inputs_60_half_std, 
-    production_need, cbetas_bcep, result_dir,
+    inputs_60_half_std[["production_gain_exp"]], inputs_60_half_std, 
+    production_need - prod_intense_half, cbetas_bcep, result_dir,
     "bcep_60_half")
+
+land_allocate(
+    inputs_80_half_std[["production_gain_exp"]], inputs_80_half_std, 
+    production_need - prod_intense_half, cbetas_bcep, result_dir,
+    "bcep_80_half")
 
 # Production gain + carbon cost + biodiversity cost
 cbetas_bcp <- c(
-    "biodiversity_cost" = 1/4, "carbon_cost" = 1/4, 
-    "elephant_cons_index" = 0, "production_gain" = 1/4,
-    "travel_time" = 1/4)
+    "biodiversity_cost" = 1/3, "carbon_cost" = 1/3, 
+    "elephant_cons_index" = 0, 
+    "potential_yield" = 1/6, "travel_time" = 1/6)
 
 # 80 scenario
 land_allocate(
-    inputs_80_std[["potential_production"]], inputs_80_std, 
-    production_need, cbetas_bcp, result_dir,
+    inputs_80_std[["production_gain_exp"]], inputs_80_std, 
+    production_need - prod_intense, cbetas_bcp, result_dir,
     "bcp_80")
 # 60 scenario
 land_allocate(
-    inputs_60_std[["potential_production"]], inputs_60_std, 
-    production_need, cbetas_bcp, result_dir,
+    inputs_60_std[["production_gain_exp"]], inputs_60_std, 
+    production_need - prod_intense, cbetas_bcp, result_dir,
     "bcp_60")
 
 # Production only
-cbetas_bce <- c(
+cbetas_p <- c(
     "biodiversity_cost" = 0, "carbon_cost" = 0, 
-    "elephant_cons_index" = 0, "production_gain" = 1/2,
-    "travel_time" = 1/2)
+    "elephant_cons_index" = 0, 
+    "potential_yield" = 1/2, "travel_time" = 1/2)
 
 # 80 scenario
 land_allocate(
-    inputs_80_std[["potential_production"]], inputs_80_std, 
-    production_need, cbetas_bce, result_dir,
+    inputs_80_std[["production_gain_exp"]], inputs_80_std, 
+    production_need - prod_intense, cbetas_p, result_dir,
     "p_80")
 # 60 scenario
 land_allocate(
-    inputs_60_std[["potential_production"]], inputs_60_std, 
-    production_need, cbetas_bce, result_dir,
+   inputs_60_std[["production_gain_exp"]], inputs_60_std, 
+    production_need - prod_intense, cbetas_p, result_dir,
     "p_60")
+```
+
+## Get the optimal tradeoff for each objective
+
+```{r}
+library(purrr)
+
+# Fresh start
+source("scripts/land_allocate.R")
+inputs_60_std <- rast(file.path(result_dir, "tradeoff_inputs_60_std.tif"))
+optimal_dir <- file.path(result_dir, "optimal")
+if (!dir.exists(optimal_dir)) dir.create(optimal_dir)
+
+# All the following calculation use 60% scenario
+# First, let's calculate the optimal condition for each ecological costs
+# Equally consider all factors
+cbetas_p <- c(
+    "biodiversity_cost" = 0, "carbon_cost" = 0, 
+    "elephant_cons_index" = 0, 
+    "potential_yield" = 1/2, "travel_time" = 1/2)
+cbetas_b <- c(
+    "biodiversity_cost" = 1, "carbon_cost" = 0, 
+    "elephant_cons_index" = 0, 
+    "potential_yield" = 0, "travel_time" = 0)
+cbetas_c <- c(
+    "biodiversity_cost" = 0, "carbon_cost" = 1, 
+    "elephant_cons_index" = 0, 
+    "potential_yield" = 0, "travel_time" = 0)
+cbetas_e <- c(
+    "biodiversity_cost" = 0, "carbon_cost" = 0, 
+    "elephant_cons_index" = 1, 
+    "potential_yield" = 0, "travel_time" = 0)
+cbetas <- list(cbetas_p, cbetas_b, cbetas_c, cbetas_e)
+names(cbetas) <- c("P", "B", "C", "E")
+
+walk(names(cbetas), function(scenario){
+    message(sprintf("Find optimal solution for scenario: %s", scenario))
+    land_allocate(
+        inputs_60_std[["production_gain_exp"]], inputs_60_std, 
+        production_need - prod_intense, cbetas[[scenario]], optimal_dir,
+        scenario)})
+```
+
+## Balance ecological objectives
+
+Use a fixed 1/3 for production, and balance costs of biodiversity, carbon, and elephant migration.
+
+```{r}
+library(pbmcapply)
+
+# Read costs
+costs <- rast(file.path(result_dir, "tradeoff_inputs_60.tif"))
+costs <- subset(costs, 2:4)
+
+# Get the minimum costs for each objective
+plant_area <- rast(file.path(lc_dir, "plant_area_tz.tif"))
+plant_area[is.na(plant_area)] <- 0
+plant_area <- plant_area %>% crop(bry) %>% mask(bry)
+plant_area <- plant_area * 100
+reference_area <- plant_area
+values(reference_area) <- 100 * 0.6
+plant_area <- reference_area - plant_area
+plant_area[plant_area < 0] <- 0
+
+fnames <- file.path(
+    optimal_dir, sprintf("fut_agro_land_%s.tif", c("B", "C", "E")))
+costs_bcd <- c(rast(fnames), plant_area, costs)
+names(costs_bcd)[1:3] <- c("B", "C", "E")
+sum_cost_bce <- values(costs_bcd) %>% 
+    as_tibble() %>% na.omit() %>% 
+    mutate(carbon_cost = carbon_cost * plant_area) %>% 
+    select(-plant_area)
+min_costs <- do.call(cbind, lapply(c("B", "C", "E"), function(scn){
+    sum_cost <- sum_cost_bce %>% 
+        select(-setdiff(c("B", "C", "E"), scn))
+    sum_costs <- data.frame(t(colSums(sum_cost)[-1]))
+    sum_costs[which(c("B", "C", "E") == scn)]
+}))
+names(min_costs) <- c("B", "C", "E")
+
+# Get the maximum costs for each objective
+fname <- file.path(
+    optimal_dir, "fut_agro_land_P.tif")
+costs_p <- c(rast(fname), plant_area, costs)
+names(costs_p)[1] <- "P"
+sum_costs_p <- values(costs_p) %>% 
+    as_tibble() %>% na.omit() %>% 
+    mutate(carbon_cost = carbon_cost * plant_area) %>% 
+    select(-plant_area)
+max_costs <- data.frame(t(colSums(sum_costs_p)[-1]))
+names(max_costs) <- c("B", "C", "E")
+
+# Gather together
+min_max_costs <- rbind(
+    min_costs %>% mutate(type = "min", .before = 1),
+    max_costs %>% mutate(type = "max", .before = 1))
+save(min_max_costs, file = file.path(optimal_dir, "tune_min_max_costs.rda"))
+
+# Tune three costs together
+# take elephant migration as a starting point
+e_weights <- seq(0, 3/4, 0.01)
+tune_costs <- do.call(rbind, pbmclapply(e_weights, function(e_weight){
+    # Then carbon cost
+    c_weights <- seq(0, 3/4 - e_weight, 0.01)
+    
+    # Calculate the land allocation
+    do.call(rbind, lapply(c_weights, function(c_weight){
+        scenario <- sprintf("bce%s%s", e_weight, c_weight)
+        b_weight <- 3/4 - e_weight - c_weight
+        cbetas <- c(
+            "biodiversity_cost" = b_weight, "carbon_cost" = c_weight, 
+            "elephant_cons_index" = e_weight, 
+            "potential_yield" = 1/8, "travel_time" = 1/8)
+        land_allocate(
+            inputs_60_std[["production_gain_exp"]], inputs_60_std, 
+            production_need - prod_intense, cbetas, optimal_dir,
+            scenario)
+        
+        # Calculate the costs
+        fname <- file.path(
+            optimal_dir, sprintf("fut_agro_land_%s.tif", scenario))
+        costs_bcd <- c(rast(fname), plant_area, costs)
+        names(costs_bcd)[1] <- "land_alloc"
+        sum_cost <- values(costs_bcd) %>% 
+            as_tibble() %>% na.omit() %>% 
+            mutate(carbon_cost = carbon_cost * plant_area) %>% 
+            select(-plant_area)
+        unlink(fname)
+        data.frame(t(colSums(sum_cost)[-1])) %>%
+            as_tibble() %>% 
+            mutate(b_weight = b_weight,
+                   c_weight = c_weight,
+                   e_weight = e_weight)}))
+}, mc.cores = 5))
+```
+
+## Analyze
+
+```{r}
+# Define function
+normalit <- function(m) (m - min(m))/(max(m) - min(m))
+
+# Normalize the cost
+tune_costs <- tune_costs %>% 
+    mutate(biodiversity_cost_norm = normalit(biodiversity_cost),
+           carbon_cost_norm = normalit(carbon_cost),
+           elephant_cons_index_norm = normalit(elephant_cons_index))
+
+# Find the most balanced solution
+stds <- sapply(1:nrow(tune_costs), function(n){
+    sd(tune_costs[n, 7:9])
+})
+tune_costs <- tune_costs %>% 
+    mutate(score = stds) %>% 
+    arrange(score)
+
+save(tune_costs, file = file.path(optimal_dir, "tune_costs.rda"))
+
+# This is it
+tune_costs %>% slice(1)
+
+# Make the table for the figure
+## Select the most harmonized one
+row_h <- tune_costs %>% slice(1)
+save(row_h, file = file.path(optimal_dir, "vals_balanced.rda"))
+
+# Get the land allocation and the costs
+cbetas_bcep <- c(
+    "biodiversity_cost" = row_h$b_weight, "carbon_cost" = row_h$c_weight, 
+    "elephant_cons_index" = row_h$e_weight, 
+    "potential_yield" = 1/8, "travel_time" = 1/8)
+
+# land
+land_allocate(
+    inputs_60_std[["production_gain_exp"]], inputs_60_std, 
+    production_need - prod_intense, cbetas_bcep, result_dir,
+    "bcep_balance")
 ```

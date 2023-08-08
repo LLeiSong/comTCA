@@ -1,8 +1,11 @@
 # Title     : Refine habitat type map
 # Objective : Use the fine resolution land cover map to refine the existing
-#           : habitat type map.
+#           : habitat type map. Use gdal functions a lot to speed up.
 # Created by: Lei Song
 # Created on: 07/26/23
+# NOTE      : Take advantage of the efforts for making the original map, 
+#             and avoid duplicated work. Do not do any meaningless guess. 
+#             The most obvious update is the arable land and urban areas.
 
 # Load libraries
 library(here)
@@ -23,9 +26,11 @@ landcover_geo_fname <- here("data/landcover/landcover_geo.tif")
 habitat_lvl2 <- rast(habitat_fname)
 
 # First, re-project land cover map to Geographic projection
+options_warp <- paste0('-multi -wo NUM_THREADS=ALL_CPUS ',
+                       '-co TILED=YES -co compress=lzw -co BIGTIFF=IF_NEEDED')
 command <- sprintf(
-    paste0("gdalwarp -t_srs EPSG:4326 -co compress=lzw %s %s"),
-    landcover_fname, landcover_geo_fname)
+    paste0("gdalwarp -t_srs EPSG:4326 %s %s %s"),
+    options_warp, landcover_fname, landcover_geo_fname)
 system(command)
 
 # Second, clip Tanzania off from the habitat type map
@@ -36,16 +41,19 @@ habitat_temp <- here("data/habitats/habitat_temp.tif")
 landcover <- rast(landcover_geo_fname)
 te <- ext(landcover); tr <- res(landcover)
 command <- sprintf(
-    paste0("gdalwarp -te %s %s %s %s -tr %s %s -co compress=lzw  %s %s"),
-    te[1], te[3], te[2], te[4], tr[1], tr[2], habitat_fname, habitat_temp)
+    paste0("gdalwarp -te %s %s %s %s -tr %s %s %s %s %s"),
+    te[1], te[3], te[2], te[4], tr[1], tr[2], 
+    options_warp, habitat_fname, habitat_temp)
 system(command)
 
 ## Mask
-options <- '--NoDataValue=0 --hideNoData --co compress=lzw'
+options_calc <- paste0('--NoDataValue=0 --hideNoData ',
+                       '--co TILED=YES --co compress=lzw ',
+                       '--co BIGTIFF=IF_NEEDED --co NUM_THREADS=ALL_CPUS')
 eq_string <- "(A != 255) * B"
 command <- sprintf('gdal_calc.py -A %s -B %s --outfile=%s --calc="%s" %s',
                    landcover_geo_fname, habitat_temp, habitat_tz, 
-                   eq_string, options)
+                   eq_string, options_calc)
 system(command)
 file.remove(habitat_temp)
 
@@ -53,17 +61,17 @@ file.remove(habitat_temp)
 ## Resample
 te <- ext(habitat_lvl2); tr <- res(habitat_lvl2)
 command <- sprintf(
-    paste0("gdalwarp -te %s %s %s %s -tr %s %s -co compress=lzw  %s %s"),
-    te[1], te[3], te[2], te[4], tr[1], tr[2], habitat_tz, habitat_temp)
+    paste0("gdalwarp -te %s %s %s %s -tr %s %s %s %s %s"),
+    te[1], te[3], te[2], te[4], tr[1], tr[2], 
+    options_warp, habitat_tz, habitat_temp)
 system(command)
 
 ## Mask
 habitat_outside <- here("data/habitats/habitat_outside_lvl2.tif")
-options <- '--NoDataValue=0 --hideNoData --co compress=lzw'
 eq_string <- "(A == 0) * B"
 command <- sprintf('gdal_calc.py -A %s -B %s --outfile=%s --calc="%s" %s',
                    habitat_temp, habitat_fname, habitat_outside, 
-                   eq_string, options)
+                   eq_string, options_calc)
 system(command)
 file.remove(habitat_temp); rm(habitat_temp)
 
@@ -236,107 +244,79 @@ system(command)
 
 ######################### Forest relevant ##############################
 eq_string <- paste0("logical_or(logical_and(A>=100, A<200), ",
-                    "logical_or(A==1403, A==1406)) * (B==2) * A")
+                    "A==1406) * (B==2) * A")
 command <- sprintf('gdal_calc.py -A %s -B %s --outfile=%s --calc="%s" %s',
                    habitat_tz, landcover_geo_fname,
-                   here('data/landcover/100_1403_1406.tif'),
+                   here('data/landcover/100_1406.tif'),
                    eq_string, options_int)
 system(command)
 
-## Use a faster aggregate method to fill the other forest
-## Because the original resolution is 100m, so using a window smaller than 100
-## won't be meaningful. Moreover, the original plantations class is not
-## reliable at all. So the objective is to fill the other forest with a regional
-## majority forest type. 1km buffer.
-forest_fill_neighbor <- function(src_path, landcover_path, 
-                                 dst_path, loop = 30){
-    # Fill some neighbors using a 1km window
-    fname_for_fill_tmp <- here('data/landcover/lcv_for_fill.tif')
-    lcv_to_fill <- rast(src_path)
-    lcv_to_fill <- aggregate(lcv_to_fill, fact = 20, fun = "modal", 
-                             na.rm = TRUE, cores = 11) # back to 100m
-    
-    # fill for first round for nearby areas
-    lcv_to_fill_1km <- aggregate(
-        lcv_to_fill, fact = 10, fun = "modal", 
-        na.rm = TRUE, cores = 11) 
-    lcv_to_fill_1km <- resample(lcv_to_fill_1km, lcv_to_fill, method = "near")
-    
-    # fill for loop
-    for (i in 1:(loop - 1)){
-        lcv_to_fill_1km <- aggregate(
-            lcv_to_fill_1km, fact = 10, fun = "modal", 
-            na.rm = TRUE, cores = 11) 
-        lcv_to_fill_1km <- resample(lcv_to_fill_1km, 
-                                    lcv_to_fill, method = "near")}
-    
-    # Use regional majority to fill other scattered forest
-    lcv_to_fill_10km <- aggregate(
-        lcv_to_fill_1km, fact = 100, fun = "modal", 
-        na.rm = TRUE, cores = 11) 
-    lcv_to_fill_10km <- resample(lcv_to_fill_10km, 
-                                 lcv_to_fill, method = "near")
-    
-    # fill for loop
-    for (i in 1:(loop - 1)){
-        lcv_to_fill_10km <- aggregate(
-            lcv_to_fill_10km, fact = 100, fun = "modal", 
-            na.rm = TRUE, cores = 11) 
-        lcv_to_fill_10km <- resample(lcv_to_fill_10km, 
-                                     lcv_to_fill, method = "near")}
-    # Final fill
-    lcv_to_fill_20km <- aggregate(
-        lcv_to_fill_10km, fact = 200, fun = "modal", 
-        na.rm = TRUE, cores = 11) 
-    lcv_to_fill_20km <- resample(lcv_to_fill_20km, 
-                                 lcv_to_fill, method = "near")
-    
-    lcv_to_fill_final <- cover(cover(lcv_to_fill_1km, lcv_to_fill_10km),
-                               lcv_to_fill_20km)
-                               
-    # save out
-    writeRaster(lcv_to_fill_final, fname_for_fill_tmp)
-    
-    # Get the mask to fill
-    fname_tmp <- here('data/landcover/mask_to_fill.tif')
-    eq_string <- "(A==2) * (B==0)"
-    options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
-    command <- sprintf('gdal_calc.py -A %s -B %s --outfile=%s --calc="%s" %s',
-                       landcover_path, src_path, fname_tmp,
-                       eq_string, options_int)
-    system(command)
-    
-    # Resample the lcv_to_fill and fill the nodata for the first round
-    template <- rast(landcover_path)
-    te <- ext(template); tr <- res(template); rm(template)
-    fname_for_fill_tmp_rsp <- here('data/landcover/lcv_for_fill_resample.tif')
-    command <- sprintf(
-        paste0("gdalwarp -te %s %s %s %s -tr %s %s -co compress=lzw  %s %s"),
-        te[1], te[3], te[2], te[4], tr[1], tr[2], fname_for_fill_tmp, 
-        fname_for_fill_tmp_rsp)
-    system(command)
-    
-    # Fill
-    eq_string <- "(A==1) * B + (A==0) * C"
-    options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
-    command <- sprintf(
-        'gdal_calc.py -A %s -B %s -C %s --outfile=%s --calc="%s" %s',
-        fname_tmp, fname_for_fill_tmp_rsp, src_path, 
-        here('data/landcover/forest_filled.tif'),
-        eq_string, options_int)
-    system(command)
-    
-    ## Fill the rest pixels with 200:Forest
-    eq_string <- "(A==2) * (B==0) * 100 + (A==2) * (B!=0) * B"
-    options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
-    command <- sprintf('gdal_calc.py -A %s -B %s --outfile=%s --calc="%s" %s',
-                       landcover_path, here('data/landcover/forest_filled.tif'), 
-                       dst_path, eq_string, options_int)
-    system(command)
-}
+# Fill with the nearest class
+forest_to_fill <- rast(here('data/landcover/100_1406.tif'))
+forest_to_fill <- aggregate(forest_to_fill, fact = 20, fun = "modal", 
+                         na.rm = TRUE, cores = 11) # back to 100m
+for (i in 1:10){
+    forest_to_fill <- focal(forest_to_fill, w = 3, fun = "modal", 
+                            na.rm = TRUE, na.policy = "only")}
 
-fill_neighbor(here('data/landcover/100_1403_1406.tif'), landcover_geo_fname,
-              here('data/landcover/100_1403_1406_full.tif'))
+# save out
+writeRaster(lcv_to_fill, here('data/landcover/100_1406_filled.tif'))
+
+# Resample the lcv_to_fill and fill the nodata for the first round
+template <- rast(landcover_geo_fname)
+te <- ext(template); tr <- res(template); rm(template)
+command <- sprintf(
+    paste0("gdalwarp -te %s %s %s %s -tr %s %s -co compress=lzw  %s %s"),
+    te[1], te[3], te[2], te[4], tr[1], tr[2], 
+    here('data/landcover/100_1406_filled.tif'), 
+    here('data/landcover/100_1406_filled_resample.tif'))
+system(command)
+
+# Fill
+eq_string <- "(A==2) * ((B!=0) * B + (A==2) * (B==0) * C)"
+options_int <- '--NoDataValue=0 --hideNoData --co compress=lzw --type UInt16'
+command <- sprintf(
+    'gdal_calc.py -A %s -B %s -C %s --outfile=%s --calc="%s" %s',
+    landcover_geo_fname, 
+    here('data/landcover/100_1406.tif'), 
+    here('data/landcover/100_1406_filled_resample.tif'), 
+    here('data/landcover/100_1406_full.tif'),
+    eq_string, options_int)
+system(command)
+
+## The 1406: plantation class is not trustable at all.
+## So update it based on https://doi.org/10.3390/rs13163081.
+## NOTE: this mask can always been updated with better available product.
+
+# Update plantation areas
+habitat <- rast(habitat_tz)
+te <- ext(habitat); tr <- res(habitat)
+command <- sprintf(
+    paste0("gdal_rasterize -te %s %s %s %s -tr %s %s ",
+           "-a_nodata 0 -ot Byte -co compress=lzw -burn 1 %s %s"),
+    te[1], te[3], te[2], te[4], tr[1], tr[2], 
+    here('data/landcover/planatation_area.geojson'),
+    here('data/landcover/planatation_area.tif'))
+system(command)
+
+eq_string <- paste0("(B==1) * (C==2) * 1403 + (C==2) * (B!=1) * A")
+command <- sprintf('gdal_calc.py -A %s -B %s -C %s --outfile=%s --calc="%s" %s',
+                   here('data/landcover/100_1406_full.tif'), 
+                   here('data/landcover/planatation_area.tif'),
+                   landcover_geo_fname,
+                   here('data/landcover/100_1406_1403.tif'),
+                   eq_string, options_int)
+system(command)
+
+## Fill the rest pixels with the most common forest type: 105:Forest
+eq_string <- "(A==2) * (B==0) * 105 + (A==2) * (B!=0) * B"
+command <- sprintf(
+    'gdal_calc.py -A %s -B %s --outfile=%s --calc="%s" %s',
+    landcover_geo_fname, 
+    here('data/landcover/100_1406_1403.tif'), 
+    here('data/landcover/100_1403_1406_full.tif'), 
+    eq_string, options_int)
+system(command)
 
 ################ Intermediate accumulate the maps #########################
 eq_string <- "(A!=0) * A + (A==0) * B"
@@ -371,24 +351,14 @@ lcv_to_fill <- rast(here('data/landcover/200_300_400_1402.tif'))
 lcv_to_fill <- aggregate(lcv_to_fill, fact = 20, fun = "modal", 
                          na.rm = TRUE, cores = 11) # back to 100m
 
-# fill for first round for nearby areas
-lcv_to_fill_1km <- aggregate(
-    lcv_to_fill, fact = 10, fun = "modal", 
-    na.rm = TRUE, cores = 11) 
-lcv_to_fill_1km <- resample(lcv_to_fill_1km, lcv_to_fill, method = "near")
-
-# fill for loop
-for (i in 1:50){
-    lcv_to_fill_1km <- aggregate(
-        lcv_to_fill_1km, fact = 10, fun = "modal", 
-        na.rm = TRUE, cores = 11) 
-    lcv_to_fill_1km <- resample(lcv_to_fill_1km, 
-                                lcv_to_fill, method = "near")}
+# Use wide neighbor majority to fill the other areas
+lcv_to_fill <- focal(
+    lcv_to_fill, w = 11, fun = "modal", na.policy = "only", na.rm = T)
 
 # save out
-writeRaster(lcv_to_fill_1km, here('data/landcover/200_300_400_1402_filled.tif'))
+writeRaster(lcv_to_fill, here('data/landcover/200_300_400_1402_filled.tif'))
 
-# Resample the lcv_to_fill and fill the nodata for the first round
+# Resample the lcv_to_fill and fill the nodata
 template <- rast(landcover_geo_fname)
 te <- ext(template); tr <- res(template); rm(template)
 command <- sprintf(

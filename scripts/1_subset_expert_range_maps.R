@@ -28,7 +28,7 @@ sf_use_s2(FALSE)
 bry <- read_sf(here("data/geoms/tanzania_coarse_bry.geojson"))
 
 # Define the function to avoid meaningless duplication
-clean_species <- function(species, bry, dst_path){
+clean_species <- function(species, bry, dst_path, mosaic = FALSE){
     message('Clean up expert range maps.')
     ## Subset the interested ones
     ## presence: extant (1), Possibly extant (2 or 3)
@@ -47,7 +47,7 @@ clean_species <- function(species, bry, dst_path){
     
     # No issues, then subset useful information only
     species <- species %>% 
-        select(sci_name, category)
+        select(sci_name, category, presence, origin, seasonal)
     
     # Get species for tanzania
     message("Get species relevant to study area")
@@ -55,15 +55,18 @@ clean_species <- function(species, bry, dst_path){
         slice(unique(unlist(st_intersects(bry, .))))
     
     # Mosaic polygons for the same species
-    species_tz <- do.call(
-        rbind, lapply(unique(species_tz$sci_name), function(sname){
-            this_species <- species_tz %>% filter(sci_name == sname)
-            if (nrow(this_species) > 1){
-                st_union(this_species) %>% st_sf() %>% 
-                    mutate(sci_name = this_species$sci_name[1],
-                           category = this_species$category[1]) %>% 
-                    select(sci_name, category, geometry)
-            } else this_species}))
+    if (mosaic){
+        species_tz <- do.call(
+            rbind, lapply(unique(species_tz$sci_name), function(sname){
+                this_species <- species_tz %>% filter(sci_name == sname)
+                if (nrow(this_species) > 1){
+                    st_union(this_species) %>% st_sf() %>% 
+                        mutate(sci_name = this_species$sci_name[1],
+                               category = this_species$category[1]) %>% 
+                        select(sci_name, category, geometry)
+                } else this_species %>% select(sci_name, category)}))
+    }
+    
     message(sprintf("No.%s of species left.", nrow(species_tz)))
     
     # Save out
@@ -97,7 +100,7 @@ birds_bad <- birds %>%
     filter(!(st_is(. , "MULTIPOLYGON") | st_is(., "POLYGON")))
 st_write(birds_bad, file.path(data_dir, "birds_bad.geojson"), delete_dsn = TRUE)
 birds_bad <- st_read(file.path(data_dir, "birds_bad.geojson"))
-birds <- rbind(birds_good %>% rename(), birds_bad)
+birds <- rbind(birds_good %>% rename(geometry = Shape), birds_bad)
 rm(birds_good, birds_bad)
 file.remove(file.path(range_map_dir, "birds_bad.geojson"))
 
@@ -139,6 +142,15 @@ reptiles_selected <- reptiles_iucn %>%
     select(sci_name) %>% unique()
 
 reptiles_tz <- reptiles_tz %>% left_join(reptiles_selected, "sci_name") %>% 
-    select(sci_name, category)
+    select(sci_name)
+
+reptiles_tz <- reptiles_tz %>% 
+    left_join(category, by = c("sci_name" = "binomial")) %>% 
+    rename(category = predicted_cat)
 
 write_sf(reptiles_tz, file.path(range_map_dir, "reptiles_tz_relevant.geojson"))
+
+# So far, these polygons are subset to ones only relevant to Tanzania.
+# For reptiles, there is no presence, origin, or seasonal info included Because
+# two data sources are merged. For other species, these info are included in the 
+# clean polygons. For birds, we want to consider seasonal habitats.

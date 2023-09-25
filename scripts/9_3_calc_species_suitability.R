@@ -163,6 +163,27 @@ fit_sdm_em <- function(species){
     save(em_models, file = fn)
 }
 
+# Suitability
+suitability <- function(species){
+    # Spatial layer
+    fn <- file.path(sdm_dir, sprintf("suit_%s.tif", gsub(" ", "_", species)))
+    suit <- rast(fn) %>% mean(na.rm = TRUE)
+    
+    # Evaluation
+    fn <- file.path(sdm_dir, sprintf("eval_%s.rda", gsub(" ", "_", species)))
+    load(fn)
+    
+    eval <- lapply(em_models, function(em){
+        tb <- em$eval %>% select(metric.eval, calibration)
+        metrics <- matrix(tb$calibration, 1, 3) %>% data.frame()
+        names(metrics) <- tb$metric.eval
+        metrics}) %>% bind_rows() %>% 
+        summarise(across(where(is.numeric), ~ mean(.x, na.rm = TRUE))) %>% 
+        mutate(species = species)
+    
+    list(suit = suit, eval = eval)
+}
+
 # Get species
 species_list <- file.path(conn_data_dir, "select_species.csv") %>% 
     read.csv() %>% pull(sci_name)
@@ -174,3 +195,17 @@ for (species in species_list){
 # Fit the final model
 for (species in species_list){
     fit_sdm_em(species)}
+
+# Get the final results
+gathered_result <- lapply(species_list, function(species){
+    suitability(species)
+})
+
+suit <- do.call(c, lapply(gathered_result, function(each) each$suit)) %>% 
+    mean(na.rm = TRUE)
+fn <- file.path(conn_data_dir, "multi_species_suitability.tif")
+writeRaster(suit, fn)
+
+eval <- do.call(rbind, lapply(gathered_result, function(each) each$eval))
+fn <- file.path(conn_data_dir, "multi_species_sdm_eval.csv")
+write.csv(eval, fn, row.names = FALSE)

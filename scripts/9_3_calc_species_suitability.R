@@ -30,12 +30,8 @@ range_dir <- file.path(
     data_dir, "expert_range_maps/refined_range_rasters/tanzania_100/mammals")
 occ_dir <- file.path(conn_data_dir, 'occurrence')
 sdm_dir <- file.path(conn_data_dir, "sdm")
-dst_dir <- file.path(conn_data_dir, 'suitability')
-for (dir_to in c(occ_dir, sdm_dir, dst_dir)){
+for (dir_to in c(occ_dir, sdm_dir)){
     if (!dir.exists(dir_to)) dir.create(dir_to)}
-
-# Get the boundary
-bry <- read_sf(here("data/geoms/tanzania_coarse_bry.geojson"))
 
 # Define functions
 ## Query GBIF occurrences

@@ -20,3 +20,7 @@
 - Run `9_2_env_variables_cooking.R` to prepare image cube of environmental variables.
 - Run `9_3_calc_species_suitability.R` to fit ensemble SDM using `biomod2` for the selected species and get the average suitability.
 - Run `9_4_calc_connectivity.R` to simulate landscape connectivity using Circuitscape.
+
+# Carbon cost
+
+- Run the Rmarkdown `10_carbon_cost.qmd` to calculate the carbon density.

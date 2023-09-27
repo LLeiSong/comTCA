@@ -1,0 +1,266 @@
+---
+title: 'Part3: carbon cost'
+author: "Lei Song"
+date: "1/4/2023"
+toc: true
+toc-depth: 2
+number-sections: false
+toc-location: left
+output: 
+  html:
+      theme: journal
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = FALSE)
+
+# Load libraries
+library(sf)
+library(here)
+library(terra)
+library(dplyr)
+library(purrr)
+select <- dplyr::select
+
+# Set paths
+carbon_data_dir <- here("data/carbon")
+trdeoff_dir <- here("data/tradeoff")
+```
+
+## Introduction
+
+In this study, we used a synthesis of multiple datasets to estimate carbon cost for land conversion. The overall carbon includes above- and below-ground carbon. The used datasets are:
+
+-   [SOC stocks (0-30 cm) made by FAO](http://54.229.242.119/GSOCmap/)
+-   [SoilGrids 2.0](https://files.isric.org/soilgrids/latest/)
+-   [NCEO Africa Aboveground Biomass map for 2017](https://leicester.figshare.com/articles/dataset/Africa_Aboveground_Biomass_map_for_2017/15060270)
+-   [CCI BIOMASS 2018](https://data.ceda.ac.uk/neodc/esacci/biomass/data/agb/maps/v3.0/geotiff/2018)
+
+The carbon cost is calculated with two parts:
+
+**Soil organic carbon stock in the top 1 m**, which is usually calculated by multiplying a factor with soil organic carbon stock. The reference equation is as follows:
+
+$$SOC\,stock = H * BD * OC $$ where $SOC\,stock$ is the soil organic carbon stock, $H$ is soil depth, $BD$ is the bulk density, and $OC$ is the soil organic carbon concentration.
+
+**Above- and below-ground biomass**, which is the sum of above-ground biomass and an estimated below-ground biomass by multiplying a root-to-shoot ratio with the above-ground biomass.
+
+There are a few root-to-shoot ratios used in various studies that are relevant to Tanzania.
+
+-   0.42, Miombo woodland of Mozambique, Ryan et al. 2011.
+-   0.642, Savanna; 1.887, tropical/subtropical grassland, Mokany et al. 2006.
+-   0.205/0.235 (<125 Mg/ha), tropical/subtropical moist forest, Mokany et al. 2006.
+
+The ratio of converting biomass to carbon:
+
+-   0.5, Saatchi et al. 2011
+-   0.49, Liang et al. 2021
+
+## Soil carbon stock
+
+We calculated soil carbon stock by combining GSOCmap v1.6.1 and SoilGrids 2.0.
+
+```{r}
+bry <- read_sf(here("data/geoms/mainland_tanzania.geojson")) %>% select()
+
+# Base URL for ISRIC SoilGrid250m
+sg_url <- "/vsicurl?max_retry=3&retry_delay=1&list_dir=no&url=https://files.isric.org/soilgrids/latest/data/"
+
+# Set the bounding box for download
+sf_use_s2(FALSE)
+crs_igh <- rast(paste0(sg_url,'soc/soc_0-5cm_mean.vrt')) %>% crs()
+crs_wgs <- "EPSG:4326"
+bbox_igh <- bry %>% st_transform(crs_igh) %>% st_bbox() %>% 
+    st_as_sfc() %>% st_buffer(1e5)
+bbox_ll <- bry %>% st_bbox() %>% 
+    st_as_sfc() %>% st_buffer(1)
+
+# Download
+depths <- c("0-5", "5-15", "15-30", "30-60", "60-100", "100-200")
+items <- c("soc", "bdod")
+sg_dir <- file.path(carbon_data_dir, "SoilGrid250m")
+if (!dir.exists(sg_dir)) dir.create(sg_dir)
+
+# Download SOC and BDOD
+walk(items, function(item){
+    dst_dir <- file.path(sg_dir, item)
+    if (!dir.exists(dst_dir)) dir.create(dst_dir)
+    
+    # For each depth
+    walk(depths, function(depth){
+        nm <- sprintf('%s/%s_%scm_mean.vrt', item, item, depth)
+        lyr <- rast(
+            paste0(sg_url, nm)) %>% 
+            crop(bbox_igh) %>% project(crs_wgs)
+        writeRaster(lyr, file.path(dst_dir, basename(gsub("vrt", "tif", nm))))
+    })
+})
+
+# Calculate the soil organic carbon stock at 1 m
+# we used the OCS at 0-30cm made by SoilGrid + GSOCmap
+# plus the calculated OCS at 30-100cm.
+# SoilGrid, bulk density: cg/cm3
+# SoilGrid, SOC, dg/kg
+# organic carbon
+fnames <- file.path(sg_dir, sprintf("soc/soc_%scm_mean.tif", depths))
+socr <- lapply(fnames, function(fname) {
+  r <- rast(fname)
+  # convert dg/kg to g/kg to percent
+  r / 10 / 10
+})
+
+# bulk density
+fnames <- file.path(sg_dir, sprintf("bdod/bdod_%scm_mean.tif", depths))
+bd <- lapply(fnames, function(fname) {
+  r <- rast(fname)
+  # convert from cg/cm3 to kg/dm3 (or g/cm3)
+  r  / 100
+})
+
+# layer depth
+depths <- c(0, 5, 15, 30, 60, 100, 200)
+thickness <- depths[-1] - depths[-length(depths)]
+
+# calculate carbon in each layer
+soct <- do.call(c, (lapply(1:length(thickness), function(x) {
+  socr[[x]] * bd[[x]] * thickness[x]
+})))
+names(soct) <- gsub("_mean", "", gsub("soc", "ocs", names(soct)))
+writeRaster(soct, file.path(carbon_data_dir, "ocs_depths_sg.tif"))
+
+# calculate soil organic carbon stock at 1m depth
+## 0-30cm, use the mean of OCS directly made by SoilGrid250m
+## and the GSOCmap 1.6.1
+nm <- sprintf('%s/%s_%scm_mean.vrt', "ocs", "ocs", "0-30")
+ocs_30_sg <- rast(
+    paste0(sg_url, nm)) %>% 
+    crop(bbox_igh) %>% project(crs_wgs)
+writeRaster(ocs_30_sg, file.path(carbon_data_dir, "ocs_30cm_sg.tif"))
+
+gsoc <- rast(file.path(carbon_data_dir, "GSOCmap1.6.1.tif")) %>% 
+    crop(bbox_ll) %>% 
+    resample(ocs_30_sg)
+ocs_30 <- (ocs_30_sg + gsoc) / 2
+
+## 30-100cm, calculate with soil organic carbon content and bulk density
+ocs_30_100 <- sum(subset(soct, 4:5))
+
+## 1m, sum them up
+ocs_1m <- ocs_30 + ocs_30_100
+writeRaster(soct_1m, file.path(carbon_data_dir, "ocs_1m_sg.tif"))
+```
+
+## Vegetation carbon stock
+
+We determined the amount of carbon stored in the vegetation above the ground by the weighted average of the National Carbon Emissions Operations (NCEO) and the Climate Change Initiative (CCI) BIOMASS. We then multiplied above-ground biomass and different land cover root-to-shoot ratios to calculate the amount of carbon stored in the roots and other below-ground parts of the vegetation.
+
+```{r}
+# CCI BIOMASS, Mg/ha
+fnames <- list.files(file.path(carbon_data_dir, "CCI_BIOMASS"),
+                     full.names = TRUE)
+sd_index <- grepl("SD", fnames)
+abv_bms_cci <- do.call(
+    merge, lapply(fnames[!sd_index], function(fname){
+    rast(fname)
+})) %>% crop(bbox_ll)
+abv_bms_sd_cci <- do.call(
+    merge, lapply(fnames[sd_index], function(fname){
+    rast(fname)
+})) %>% crop(bbox_ll)
+
+# NCEO, Mg/ha
+fnames <- list.files(file.path(carbon_data_dir, "NCEO"),
+                     full.names = TRUE)
+sd_index <- grepl("SD", fnames)
+abv_bms_nceo <- rast(fnames[!sd_index]) %>% crop(bbox_ll) %>% 
+    resample(abv_bms_cci)
+abv_bms_sd_nceo <- rast(fnames[sd_index]) %>% crop(bbox_ll) %>% 
+    resample(abv_bms_cci)
+
+# Weighted average
+factor_cci <- (abv_bms_cci + 0.0001) / (abv_bms_sd_cci + 0.001)
+factor_nceo <- (abv_bms_nceo + 0.0001) / (abv_bms_sd_nceo + 0.001)
+abv_bms <- (abv_bms_cci * factor_cci + abv_bms_nceo * factor_nceo) / 
+    (factor_cci + factor_nceo)
+writeRaster(abv_bms, file.path(carbon_data_dir, "aboveground_biomass.tif"))
+
+# Below-ground biomass
+# 0.42, Miombo woodland of Mozambique, Ryan et al. 2011.
+# 0.642, Savanna; 1.887, tropical/subtropical grassland, Mokany et al. 2006.
+# 0.205/0.235 (<125 Mg/ha), tropical/subtropical moist forest, Mokany et al. 2006.
+# 0.563/0.275 (<20 Mg/ha), tropical/subtropical dry forest, Mokany et al. 2006.
+# so, savanna - (0.42 + 0.642) / 2
+# tropical dry forest - < 20, 0.563, > 20, 0.275
+# grassland (plus wetland and bareland) - 1.887
+# cropland - 0.2 (estimated)
+# water/built-up - 0
+landcover <- rast(file.path("data/landcover/landcover_tz_1km.tif"))
+landcover <- project(landcover, abv_bms, method = "near")
+
+# savanna
+msk <- landcover == 4
+blw_bms_shrub <- abv_bms * msk * ((0.42 + 0.642) / 2)
+
+# tropical dry forest
+msk <- landcover == 2 & abv_bms <= 20
+blw_bms_tree1 <- abv_bms * msk * 0.563
+msk <- landcover == 2 & abv_bms > 20
+blw_bms_tree <- abv_bms * msk * 0.275 + blw_bms_tree1
+
+# grassland
+msk <- landcover %in% c(3, 8, 7)
+blw_bms_grass <- abv_bms * msk * 1.887
+
+# cropland, calculate it as well to keep the map continuous
+msk <- landcover == 1
+blw_bms_crop <- abv_bms * msk * 0.2
+
+# water/built-up
+msk <- landcover %in% c(5, 6)
+blw_bms_wb <- abv_bms * msk * 0
+
+blw_bms <- blw_bms_shrub + blw_bms_tree + 
+    blw_bms_grass + blw_bms_crop + blw_bms_wb
+writeRaster(blw_bms, file.path(carbon_data_dir, "belowground_biomass.tif"))
+
+# Both above and below-ground biomass
+root_shoot <- 0.49
+bms_carbon <- (abv_bms + blw_bms) * root_shoot
+writeRaster(bms_carbon, file.path(carbon_data_dir, "biomass_carbon.tif"))
+```
+
+## All carbon stock
+
+```{r}
+# soil carbon: t/ha
+# biomass carbon: Mg/ha
+# they are the same
+## 100% of vegetative carbon and 25% of soil carbon
+carbon <- bms_carbon + resample(soct_1m, bms_carbon) * 0.25
+names(carbon) <- "carbon_density"
+writeRaster(carbon, file.path(carbon_data_dir, "carbon_density.tif"))
+```
+
+## Carbon cost
+
+```{r}
+# Carbon cost = carbon density * convert area
+# t/ha * ha = t
+plant_area <- rast("data/landcover/plant_area_tz.tif")
+# Each pixel is 1km * 1km = 100ha,
+plant_area <- plant_area * 100
+plant_area[is.na(plant_area)] <- 0
+
+# Resample
+carbon <- resample(carbon, plant_area)
+
+area_release_80 <- 100 * 0.8 - plant_area
+area_release_80[area_release_80 < 0] <- 0
+carbon_cost_80 <- carbon * area_release_80
+writeRaster(carbon_cost_80, file.path(trdeoff_dir, "carbon_cost_80.tif"))
+
+area_release_60 <- 100 * 0.6 - plant_area
+area_release_60[area_release_60 < 0] <- 0
+carbon_cost_60 <- carbon * area_release_60
+writeRaster(carbon_cost_60, file.path(trdeoff_dir, "carbon_cost_60.tif"))
+```
+

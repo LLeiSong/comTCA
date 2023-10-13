@@ -3,6 +3,8 @@
 #             connectivity. Use the mean suitability values as the conductance. 
 # Created by: Lei Song
 # Created on: 09/09/23
+# Note      : Use cg+amg solver to avoid RAM crisis. The user can modify the
+#             loop part to an independent script to run on HPC.
 
 # Load libraries
 library(sf)
@@ -100,10 +102,14 @@ cum_rasters <- lapply(1:n_iteration, function(n) {
     set.seed(100 + n)
     
     # Get the PAs
+    ## Use half PAs and randomly generate mini habitat patches as nodes
     nodes <- pas %>% sample_frac(0.5) %>%
-        mutate(id = 1:nrow(.)) %>%
+        st_sample(size = rep(1, nrow(.))) %>% 
+        st_as_sf() %>% mutate(id = 1:nrow(.)) %>% vect() %>% 
+        buffer(width = 5000) %>% 
         rasterize(suit_map, field = "id")
     nodes[nodes == 0] <- -9999
+    nodes <- mask(nodes, suit_map)
     
     # Name it
     nm <- sprintf('iter_%s', n)
@@ -111,7 +117,7 @@ cum_rasters <- lapply(1:n_iteration, function(n) {
     
     # Save out nodes
     node_name <- file.path(src_dir, sprintf("nodes_%s.asc", nm))
-    writeRaster(nodes, node_name, wopt = list(NAflag = -9999))
+    writeRaster(nodes, node_name, wopt = list(NAflag = -9999), overwrite = TRUE)
     
     # Revise the config parameters
     config$`Output options`$write_cur_maps <- 0
@@ -125,7 +131,11 @@ cum_rasters <- lapply(1:n_iteration, function(n) {
     config$`Options for pairwise and one-to-all and all-to-one modes`$point_file <-
         node_name
     config$`Habitat raster or graph`$habitat_file <- suit_fname
-    config$`Calculation options`$max_parallel <- parallel::detectCores()
+    config$`Calculation options`$parallelize <- 'False'
+    config$`Calculation options`$solver <- "cg+amg"
+    config$`Calculation options`$print_timings <- 'True'
+    config$`Calculation options`$print_rusages <- 'True'
+    config$`Calculation options`$preemptive_memory_release <- 'True'
     fname <- file.path(src_dir, sprintf("%s.ini", nm))
     write.ini(config, fname)
     
@@ -151,3 +161,9 @@ cum_fname <- file.path(circ_dir, "cum_curmap.tif")
 mean_fname <- file.path(circ_dir, "mean_curmap.tif")
 writeRaster(cum_raster, cum_fname)
 writeRaster(mean_raster, mean_fname)
+
+# Normalize the mean cumulative current density
+mean_raster_norm <- stretch(mean_raster, minv = 0, maxv = 1, histeq = TRUE)
+writeRaster(
+    mean_raster_norm, overwrite = TRUE,
+    file.path(circ_dir, "mean_curmap_robust_norm.tif"))

@@ -21,6 +21,11 @@
 - Run `9_3_calc_species_suitability.R` to fit ensemble SDM using `biomod2` for the selected species and get the average suitability.
 - Run `9_4_calc_connectivity.R` to simulate landscape connectivity using Circuitscape.
 
-# Carbon cost
+## Carbon cost
 
 - Run the Rmarkdown `10_carbon_cost.qmd` to calculate the carbon density.
+
+## Crop yield and gaps
+
+- Run `11_downscale_yield.R` to use quantile regression forest to downscale SPAM 2017 yield maps of 10 km to 1 km.
+- Run `11_calibrate_yield.R` to calibrate the downscaled yield to match with district surveys and then use predicted 95% quantile as the attainable yield.

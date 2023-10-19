@@ -86,7 +86,7 @@ yields_calib <- do.call(c, lapply(names_cov$name, function(crp){
     # Only use rainfed
     yields_crp <- yields[[crp]]
     
-    ## Add factor to pixel values to shift the mean to match with surveys.
+    ## Get the best match quantile value with surveys.
     do.call(merge, lapply(unique(regions$Region), function(rg){
         ply <- regions %>% filter(Region == rg)
         yield_rg <- crop(yields_crp, ply) %>% mask(ply)
@@ -137,3 +137,29 @@ global(yields_atn, mean, na.rm = TRUE)
 # Save out
 fname <- file.path(data_dir, "yield_attainable_5crops_tz_1km.tif")
 writeRaster(yields_atn, fname)
+
+# Check yield calibrated result
+library(ggplot2)
+
+# Collect data
+yield_compare <- do.call(rbind, lapply(unique(regions$Region), function(rg){
+    ply <- regions %>% filter(Region == rg)
+    yield_rg <- crop(yields_calib, ply) %>% mask(ply)
+    farmland_rg <- crop(farmland, ply) %>% mask(ply)
+    
+    # Step 2: get real yield
+    real_yield <- nsca_yield %>% filter(Region == rg) %>% 
+        filter(Season == "both") %>% select(Region, Crop, Yield)
+    
+    yield_rg_msk <- mask(yield_rg, farmland_rg)
+    yield_cl <- global(yield_rg_msk, mean, na.rm = TRUE) %>% 
+        data.frame() %>% mutate(Crop = row.names(.)) %>% 
+        rename(Calibrated_Yield = mean) %>% mutate(Region = rg) %>% 
+        inner_join(real_yield, by = c('Region', 'Crop'))
+}))
+
+# Plot
+ggplot(yield_compare) + 
+    geom_point(aes(x = Yield, y = Calibrated_Yield)) +
+    facet_grid(~Crop, scales = "free") +
+    theme_pubclean()

@@ -141,23 +141,34 @@ library(ggpubr)
 fig_yield_qrf <- function(crp){
     fname <- file.path(data_dir, sprintf("yield_05_95_%s_R_1km.csv", crp))
     vals <- read.csv(fname)
+    load(file.path(data_dir, sprintf("qrf_%s.rda", crp)))
+    
+    # Make figure
+    mse_text <- sprintf("OOB prediction error (MSE): %s", round(rf_model$prediction.error, 2))
+    r_text <- sprintf("R squared (OOB): %s", round(rf_model$r.squared, 2))
     pd <- position_dodge(0.1)
-    ggplot(vals, aes(x = yield, y = `quantile..0.5`)) + 
+    ggplot(vals, aes(x = yield)) + 
         geom_errorbar(
             aes(ymin = `quantile..0.25`, ymax = `quantile..0.75`, 
-                color = "Predicted 75% interval"), width = 0, position = pd) +
+                color = "Predicted 50% interval"), width = 0, position = pd) +
         geom_abline(color = "grey", linetype = 'dashed') +
-        geom_point(aes(color = "Predicted median"), 
-                   position = pd, size = 0.5) +
-        scale_color_manual("",
-                           values = c("Predicted median" = 'black',
-                                      'Predicted 75% interval' = 'lightblue')) +
-        xlab("Actual yield (tons/ha)") +
-        ylab("Predicted yield (tons/ha)") +
+        geom_point(aes(y = `quantile..0.5`, color = "Predicted median"), 
+                   position = pd, size = 0.3) +
+        scale_color_manual(
+            "", values = c("Predicted median" = 'black',
+                           'Predicted 50% interval' = 'lightblue')) +
+        annotate(geom = "text", x = 0, 
+                 y = max(apply(vals, MARGIN = 2, FUN = max)[-1]) * 0.95, 
+                 label = mse_text, hjust = 0, size = 3) +
+        annotate(geom = "text", x = 0, 
+                 y = max(apply(vals, MARGIN = 2, FUN = max)[-1]) * 0.90, 
+                 label = r_text, hjust = 0, size = 3) +
+        xlab("Actual yield (t/ha)") +
+        ylab("Predicted yield (t/ha)") +
         theme_bw() +
         theme(legend.position = "top",
-              legend.text = element_text(size = 10),
-              text = element_text(size = 10))
+              legend.text = element_text(size = 12),
+              text = element_text(size = 12))
 }
 
 fig_list <- lapply(crops, fig_yield_qrf)
@@ -165,4 +176,4 @@ ggarrange(
     plotlist = fig_list,
     labels = c("A", "B", "C", "D", "E"),
     ncol = 3, nrow = 2, common.legend = TRUE, legend = "bottom")
-ggsave("figures/downscale_yield.png", width = 8, height = 6, bg = "white")
+ggsave("figures/S1_eval_yield_downscale.png", width = 8, height = 6, bg = "white")

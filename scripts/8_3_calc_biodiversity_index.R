@@ -34,10 +34,9 @@ writeRaster(bhi_msa_bii, file.path(bio_data_dir, "bhi_msa_bii.tif"))
 bhi_msa_bii <- rast(file.path(bio_data_dir, "bhi_msa_bii.tif"))
 
 # Calculate species component
-normalize <- function(x, robust = FALSE) {
-    if (robust){
-        # Standard robust scaling uses the interquartile range: 25% - 75%.
-        stretch(x, minv = 0, maxv = 1, minq = 0.25, maxq = 0.75)
+normalize <- function(x, robust = TRUE) {
+    if (robust) {
+        stretch(x, minv = 0, maxv = 1, minq = 0.01, maxq = 0.99)
     } else {
         (x - minmax(x)[1]) / (minmax(x)[2] - minmax(x)[1])
     }
@@ -48,13 +47,15 @@ richness_fns <- fnames[!grepl("rarity", fnames)]
 
 richness <- do.call(
     c, lapply(richness_fns, function(fn){
-        normalize(rast(fn) %>% mask(bry))})) %>% mean() %>% normalize()
+        normalize(rast(fn) %>% mask(bry))})) %>% 
+    mean() %>% normalize(FALSE)
 
 endemism_fns <- fnames[grepl("rarity", fnames)]
-# Use robust scaling to avoild the impacts of outliers
+# Use robust scaling to avoid the impacts of outliers
 endemism <- do.call(
     c, lapply(endemism_fns, function(fn){
-        normalize(rast(fn) %>% mask(bry), TRUE)})) %>% mean() %>% normalize()
+        normalize(sqrt(sqrt(rast(fn) %>% mask(bry))))})) %>% 
+    mean() %>% normalize(FALSE)
 
 # Geometric mean for species richness and endemism richness
 # (the Nth root of the product of N numbers - 

@@ -11,12 +11,15 @@
 ## Notes: Data: only focus on rainfed.
 ## https://dataverse.harvard.edu/dataset.xhtml?persistentId=doi:10.7910/DVN/FSSKBW
 ## https://www.nbs.go.tz/index.php/en/
-## 2021 for Tanzania
-## maize: 1.6 tons/ha
-## rice: 2.81 tons/ha
-## sorghum: 1.04 tons/ha
-## cassava: 6.21 tons/ha
-## beans: 1.3 tons/ha
+## 2020 for Tanzania
+## maize: 1.5 tons/ha
+## rice: 2.3 tons/ha
+## sorghum: 1.3 tons/ha
+## cassava: 8.4 tons/ha
+## beans: 0.9 tons/ha
+## planted area weight: 6, 2, 1, 1, 1 based on 2020 survey
+## attainable yield
+## https://www.fao.org/global-perspectives-studies/food-agriculture-projections-to-2050/en/
 ## --------------------------------------------
 
 # Load libraries
@@ -117,18 +120,40 @@ yields_calib <- do.call(c, lapply(names_cov$name, function(crp){
 names(yields_calib) <- names_cov$name
 
 # Check the statistics
-global(yields_calib, mean, na.rm = TRUE)
+global(mask(yields_calib, crop(farmland, yields_calib)), mean, na.rm = TRUE)
 
 # Save out
 fname <- file.path(data_dir, "yield_calibrated_5crops_tz_1km.tif")
 writeRaster(yields_calib, fname)
 
 # Use 95% quantile as the attainable yield
+fao_yield_pred <- data.frame(
+    Crop = names_cov$name,
+    Current_yield = c(1.39, 2.33, 1.2, 6.38, 1),
+    Predicted_yield = c(1.82, 3.3, 1.66, 8.52, 1.55))
+
+# the survey yields and FAO simulated yields are very similar except cassava.
+# so we calibrate the cassava yield by multiplying a factor
+fao_yield_pred[4, 3] <- fao_yield_pred[4, 3] * (8.4 / fao_yield_pred[4, 2])
+
 yields_atn <- do.call(c, lapply(names_cov$name, function(crp){
     # Only use rainfed
     yields_crp <- yields[[crp]]
-    subset(yields_crp, 'prediction.quantile..0.95')
+    
+    # Get the best match quantile
+    fao_yield <- fao_yield_pred %>% filter(Crop == crp) %>% pull(Predicted_yield)
+    yields_crp_msk <- mask(yields_crp, farmland)
+    best_quantile <- global(yields_crp_msk, mean, na.rm = TRUE) %>% 
+        data.frame() %>% rename(yield = mean) %>% 
+        mutate(quantile = row.names(.)) %>% 
+        mutate(residual = abs(yield - fao_yield)) %>% 
+        filter(residual == min(residual)) %>% slice(1) %>% pull(quantile)
+    
+    subset(yields_crp, best_quantile)
 }))
+
+# Extract the selected quantiles
+atn_quantiles <- names(yields_atn)
 names(yields_atn) <- names_cov$name
 
 # Check the statistics
@@ -136,10 +161,13 @@ global(yields_atn, mean, na.rm = TRUE)
 
 # Save out
 fname <- file.path(data_dir, "yield_attainable_5crops_tz_1km.tif")
-writeRaster(yields_atn, fname)
+writeRaster(yields_atn, fname, overwrite = TRUE)
+
+save(atn_quantiles, file = file.path(data_dir, "quantiles_attainable_yield.rda"))
 
 # Check yield calibrated result
 library(ggplot2)
+library(ggpubr)
 
 # Collect data
 yield_compare <- do.call(rbind, lapply(unique(regions$Region), function(rg){
@@ -156,10 +184,20 @@ yield_compare <- do.call(rbind, lapply(unique(regions$Region), function(rg){
         data.frame() %>% mutate(Crop = row.names(.)) %>% 
         rename(Calibrated_Yield = mean) %>% mutate(Region = rg) %>% 
         inner_join(real_yield, by = c('Region', 'Crop'))
-}))
+})) %>% mutate(Crop = factor(Crop, levels = crops, labels = LETTERS[1:length(crops)]))
 
 # Plot
-ggplot(yield_compare) + 
-    geom_point(aes(x = Yield, y = Calibrated_Yield)) +
-    facet_grid(~Crop, scales = "free") +
-    theme_pubclean()
+ggplot(yield_compare, aes(x = Yield, y = Calibrated_Yield)) + 
+    geom_smooth(method = "lm", se = FALSE, color = "grey", size = 0.6) +
+    geom_point() +
+    stat_cor(aes(label = paste(after_stat(rr.label))),
+             r.accuracy = 0.01,
+             label.y.npc="top", label.x.npc = "left", size = 4) +
+    facet_wrap(~Crop, scales = "free") +
+    xlab("District-level survey yield (t/ha)") +
+    ylab("District mean of calibrated yield over cultivated area (t/ha)") +
+    theme_pubclean() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(
+              size = 12, face = "bold"))
+ggsave("figures/S2_eval_yield_calibrate.png", width = 8, height = 6, bg = "white")

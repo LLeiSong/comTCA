@@ -37,7 +37,7 @@ names(yields) <- crops
 # convert: kg/ha to tons/ha and set 0 to NA
 yields <- yields / 1000
 yields[yields == 0] <- NA
-writeRaster(yields, file.path(data_dir, "yields_10km.tif"))
+writeRaster(yields, file.path(data_dir, "yields_10km.tif"), overwrite = TRUE)
 
 # MODIS ET and LST -----------------
 ## Process in GEE
@@ -76,10 +76,10 @@ soils <- do.call(c, lapply(fnames, rast))
 # Save out
 vars_10km <- c(resample(modis_10km, yields), resample(wc_1km, yields),
                resample(soils, yields))
-writeRaster(vars_10km, file.path(data_dir, "variables_10km.tif"))
-vars_1km <- c(modis_1km, resample(wc_1km, modis_1km),
-              resample(soils, modis_1km))
-writeRaster(vars_1km, file.path(data_dir, "variables_1km.tif"))
+writeRaster(vars_10km, file.path(data_dir, "variables_10km.tif"), overwrite = TRUE)
+vars_1km <- c(resample(modis_1km, wc_1km), wc_1km,
+              resample(soils, wc_1km))
+writeRaster(vars_1km, file.path(data_dir, "variables_1km.tif"), overwrite = TRUE)
 
 # Clean
 rm(wc_1km, soils, fnames); gc()
@@ -165,7 +165,7 @@ fig_yield_qrf <- function(crp){
                  label = r_text, hjust = 0, size = 3) +
         xlab("Actual yield (t/ha)") +
         ylab("Predicted yield (t/ha)") +
-        theme_bw() +
+        theme_pubclean() +
         theme(legend.position = "top",
               legend.text = element_text(size = 12),
               text = element_text(size = 12))

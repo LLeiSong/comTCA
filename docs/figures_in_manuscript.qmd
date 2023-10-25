@@ -1,0 +1,661 @@
+---
+title: "Figures for manuscript"
+author: "Lei Song"
+format: html
+---
+
+```{r}
+library(terra)
+library(sf)
+library(ggplot2)
+library(cowplot)
+library(ggpubr)
+library(tidyterra)
+library(stringr)
+library(dplyr)
+library(colorspace)
+library(stars)
+library(rnaturalearth)
+library(ggfx)
+sf_use_s2(FALSE)
+
+# Paths
+agro_dir <- "data/agriculture"
+lc_dir <- "data/landcover"
+
+# Study area
+bry <- read_sf("data/geoms/mainland_tanzania.geojson") %>% 
+    select() %>% mutate(name = "Tanzania")
+```
+
+## Study area
+
+### Figure 1
+
+```{r}
+# Habitats
+## Read palette
+color_table <- readLines(
+    file.path(lc_dir, "lc_legend_8classes.qml"))
+color_table <- color_table[str_detect(color_table, "paletteEntry")]
+color_table <- do.call(rbind, lapply(color_table, function(line){
+    line <- gsub("<paletteEntry ", "", line)
+    items <- strsplit(line, '\" ')[[1]]
+    label <- items[str_detect(items, "label")]
+    label <- gsub('        label=\"','', label)
+    color <- items[str_detect(items, "color")]
+    color <- gsub('[^[:alnum:] ]|color','', color)
+    color <- paste0("#", color)
+    value <- items[str_detect(items, "value")]
+    value <- as.numeric(gsub('[^[:alnum:] ]|value','', value))
+    data.frame(value = value, color = color, label = label)}))
+
+landcover <- rast(file.path(lc_dir, "landcover_tz_1km.tif")) %>% 
+    project("epsg:4326", method = "near") %>% 
+    crop(bry) %>% mask(bry)
+names(landcover) <- "landcover"
+
+# Convert map to factors
+cls <- data.frame(id = color_table$value, 
+                  landcover = color_table$label)
+levels(landcover) <- cls
+
+coltab(landcover) <- data.frame(
+    value = color_table$value, col = color_table$color)
+landcover <- st_as_stars(landcover)
+
+# Protected areas
+pas <- read_sf(
+    file.path("data/protected_area", "WDPA_WDOECM_Jan2023_Public_TZA",
+              "WDPA_WDOECM_Jan2023_Public_TZA.gdb"),
+    layer = "WDPA_WDOECM_poly_Jan2023_TZA")
+pas <- pas %>% 
+    select(WDPAID, NAME, DESIG) %>% 
+    rename(Geometry = SHAPE) %>% 
+    filter(!DESIG %in% c("Marine Reserve", "Marine Park"))
+pas <- pas %>% 
+    slice(unique(unlist(st_intersects(bry, pas)))) %>% 
+    st_simplify()
+pas <- rasterize(pas, habitats) %>% 
+    as.polygons() %>% st_as_sf()
+
+# Make the figure
+## Overview
+countries <- ne_countries(
+    type = 'countries', scale = 'large',
+    continent = "Africa", returnclass = 'sf')
+east_africa <- read_sf(file.path("data/geoms/east_africa.sqlite"))
+
+# Make overview
+overview <- ggplotGrob(ggplot() +
+    with_shadow(
+        geom_sf(data = countries, fill = 'lightgrey', 
+                color = 'black', linewidth = 0.3),
+        sigma = 1, x_offset = 10, y_offset = 10) +
+    geom_sf(data = bry, fill = 'orange', 
+            color = 'black', linewidth = 0.3) +
+    coord_sf(xlim = c(-17.892, 51.892), 
+             ylim = c(-35.321, 37.715)) +
+    theme_transparent() +
+    theme(axis.title = element_blank(),
+          axis.text = element_blank(),
+          axis.ticks = element_blank(),
+          panel.grid.major = element_blank(),
+          plot.margin = unit(rep(-0.6, 4), "cm")))
+
+## Main figure
+ggplot() +
+    geom_stars(data = landcover, na.action = na.omit, alpha = 0.9) +
+    scale_fill_manual(
+        "Major land cover types", values = color_table$color,
+        guide = guide_legend(
+            override.aes = list(linetype = "blank", 
+                                shape = NA),
+            nrow = 3, title.position = "top", 
+            order = 1, title.hjust = 0.5)) +
+    geom_sf(data = pas, aes(color = "Protected areas"), 
+            fill = "transparent", linewidth = 0.4) +
+    geom_sf(data = bry, aes(color = "Mainland Tanzania"), 
+            fill = "transparent", linewidth = 0.6) +
+    scale_color_manual(
+        NULL, values = c("grey20", "black"),
+        breaks = c("Mainland Tanzania", 'Protected areas'),
+        guide = guide_legend(order = 2)) +
+    annotation_custom(grob = overview, 
+                      xmin = 37.2, xmax = 40.1,
+                      ymin = - 3.8, ymax = -1.4) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.title = element_text(size = 10, face = "bold"),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.4, 'cm'),
+          plot.margin = unit(c(0, -2, 0, -2), "cm"),
+          legend.position = "bottom",
+          legend.box.just = "left",
+          legend.box = "vertical")
+
+ggsave("figures/figure1_study_area.png",
+       bg = "white",
+       width = 3.5, height = 4.5, dpi = 500)
+```
+
+## Agricultural yield
+
+### Figure S3
+
+Down-scaled and calibrated current yield map of maize (A), rice (B), sorghum (C), cassava (D), and beans (E) at 1 km.
+
+```{r}
+fname <- file.path(agro_dir, "yield_calibrated_5crops_tz_1km.tif")
+yields_calib <- rast(fname)
+
+org_yields <- rast(file.path(agro_dir, "yields_10km.tif"))
+names(org_yields) <- names(yields_calib)
+
+fig_list <- lapply(names(yields_calib), function(nm){
+    org_yield <- org_yields[[nm]]
+    yield_calib <- yields_calib[[nm]]
+    
+    org_figure <- ggplot() +
+        geom_spatraster(data = org_yield, na.rm = TRUE) +
+        scale_fill_continuous_sequential(
+            name = "Yield (t/ha)",
+            palette = "Plasma", na.value = NA) +
+        geom_sf(data = bry, color = "black", 
+                fill = "transparent", linewidth = 0.4) +
+        coord_sf() + theme_void() +
+        theme(legend.position = "null")
+    
+    org_figure <- ggplotGrob(org_figure)
+    
+    ggplot() +
+        geom_spatraster(data = yield_calib, na.rm = TRUE) +
+        scale_fill_continuous_sequential(
+            name = "Yield (t/ha)",
+            palette = "Plasma", na.value = NA,
+            guide = guide_colourbar(
+                title.position = "top", title.hjust = 0.5)) +
+        geom_sf(data = bry, color = "black", 
+                fill = "transparent", linewidth = 0.6) +
+        annotation_custom(grob = org_figure, 
+                      xmin = 37.2, xmax = 40.6,
+                      ymin = - 4.0, ymax = -0.8) +
+        coord_sf() + theme_void() +
+        theme(text = element_text(size = 12),
+              strip.text.x = element_text(size = 12),
+              legend.text = element_text(size = 12),
+              legend.spacing.y = unit(0.1, 'cm'),
+              legend.margin = margin(rep(0, 4)), 
+              legend.key.height = unit(0.4, 'cm'),
+              legend.key.width = unit(0.8, 'cm'),
+              plot.margin = unit(c(0, 0, 0, 0), "cm"),
+              legend.position = "bottom",
+              legend.box = "vertical")
+})
+ggarrange(plotlist = fig_list, nrow = 2, ncol = 3,
+          labels = c("A", "B", "C", "D", "E"))
+
+ggsave("figures/S3_current_yields.png",
+       bg = "white",
+       width = 7.5, height = 5.5, dpi = 500)
+```
+
+### Table S1
+
+```{r}
+crops <- c("MAIZ", "RICE", "SORG", "CASS", "BEAN")
+var_summary <- lapply(crops, function(crp){
+    load(file.path(agro_dir, sprintf("qrf_%s.rda", crp)))
+    variables <- rf_model$forest$independent.variable.names
+    
+    # Group the variables
+    temperature <- variables[str_detect(variables, "tmean|tmax|tmin|gdd|srad[0-9]+")]
+    temperature <- gsub("tm", "TM", temperature)
+    temperature <- gsub("gdd", "GDD", temperature)
+    temperature <- gsub("srad", "Srad", temperature)
+    precipitation <- variables[str_detect(variables, "prec|vapr|et[0-9]+")]
+    precipitation <- gsub("et", "ET", precipitation)
+    precipitation <- gsub("prec", "Prec", precipitation)
+    precipitation <- gsub("vapr", "Vapr", precipitation)
+    soil <- variables[str_detect(variables, "_mean")]
+    soil <- gsub("_mean", "", soil)
+    soil <- gsub("\\.", "-", soil)
+    
+    # Add them together to a table
+    ## temp
+    temperature <- sapply(c("TMean", "TMax", "TMin", "GDD", "Srad"), function(item){
+        item_list <- temperature[grep(item, temperature)]
+        paste(item_list, collapse = ", ")
+    }) %>% data.frame(Selected = .) %>% mutate(Group = row.names(.)) %>% 
+        mutate(Element = "Temperature")
+    
+    ## prec
+    precipitation <- sapply(c("ET", "Prec", "Vapr"), function(item){
+        item_list <- precipitation[grep(item, precipitation)]
+        paste(item_list, collapse = ", ")
+    }) %>% data.frame(Selected = .) %>% mutate(Group = row.names(.)) %>% 
+        mutate(Element = "Precipitation")
+    
+    ## soil
+    soil <- sapply(c("bdod", "cec", "cfvo", "clay", 
+                     "nitrogen", "phh2o", "sand", "silt", "soc"), function(item){
+        item_list <- soil[grep(item, soil)]
+        paste(item_list, collapse = ", ")
+    }) %>% data.frame(Selected = .) %>% mutate(Group = row.names(.)) %>% 
+        mutate(Element = "Soil")
+    
+    tb <- rbind(temperature, precipitation, soil) %>%
+        select(Element, Group, Selected)
+    names(tb)[3] <- crp
+    tb
+})
+
+var_summary <- Reduce(full_join, var_summary)
+write.csv(var_summary, "figures/table_s1_selected_vars.csv", row.names = FALSE)
+```
+
+### Figure S4
+
+Attainable yield (predicted 95% quantile of crop yield downscaling model) map at 1 km.
+
+```{r}
+fname <- file.path(agro_dir, "yield_attainable_5crops_tz_1km.tif")
+yields_atn <- rast(fname)
+
+fig_list <- lapply(names(yields_atn), function(nm){
+    yield_atn <- yields_atn[[nm]]
+    
+    ggplot() +
+        geom_spatraster(data = yield_atn, na.rm = TRUE) +
+        scale_fill_continuous_sequential(
+            name = "Yield (t/ha)",
+            palette = "Plasma", na.value = NA,
+            guide = guide_colourbar(
+                title.position = "top", title.hjust = 0.5)) +
+        geom_sf(data = bry, color = "black", 
+                fill = "transparent", linewidth = 0.6) +
+        coord_sf() + theme_void() +
+        theme(text = element_text(size = 12),
+              strip.text.x = element_text(size = 12),
+              legend.text = element_text(size = 12),
+              legend.spacing.y = unit(0.1, 'cm'),
+              legend.margin = margin(rep(0, 4)), 
+              legend.key.height = unit(0.4, 'cm'),
+              legend.key.width = unit(0.8, 'cm'),
+              plot.margin = unit(c(0, 0, 0, 0), "cm"),
+              legend.position = "bottom",
+              legend.box = "vertical")
+})
+ggarrange(plotlist = fig_list, nrow = 2, ncol = 3,
+          labels = c("A", "B", "C", "D", "E"))
+
+ggsave("figures/S4_attainable_yields.png",
+       bg = "white",
+       width = 7.5, height = 5.5, dpi = 500)
+```
+
+## Refine species habitat type map and range map
+
+### Figure S5
+
+Habitat type map of Tanzania before and after refining.
+
+```{r}
+hbt_dir <- "data/habitats"
+habitat_lv2 <- rast(file.path(hbt_dir, "habitat_tz_lvl2.tif"))
+habitat_refined <- rast(file.path(hbt_dir, "habitat_tz_refined_final.tif"))
+
+# Plot
+clr <- read.delim2(file.path(hbt_dir, "styles/level2.clr"), header = FALSE)[[1]]
+clr <- do.call(rbind, lapply(clr, function(r){
+    nums <- as.integer(str_extract_all(r, "[0-9]+ ")[[1]])[1:5]
+    nm <- gsub(paste(nums, collapse = " "), "", r)
+    nm <- gsub("^ ", "", nm)
+    
+    matrix(c(nums[1:4], nm), nrow = 1, ncol = 5)
+}))
+
+levels(habitat_lv2) <- levels(habitat_refined) <- 
+    data.frame(value = as.integer(clr[, 1]), landcover = clr[, 5])
+coltab(habitat_lv2) <- coltab(habitat_refined) <- 
+    data.frame(value = as.integer(clr[, 1]), red = as.integer(clr[, 2]), 
+               blue = as.integer(clr[, 3]), green = as.integer(clr[, 4]))
+
+# Plot
+cols <- coltab(habitat_lv2)[[1]]
+cols <- sapply(1:nrow(cols), function(i){
+    rgb(cols[i, 2:4], maxColorValue = 255)})
+
+# Can't believe I have to rely on base R plot for efficient plotting in 2023.
+p1 <- function() {
+    par(mar = rep(0, 4))
+    plot(habitat_lv2, axes = FALSE, box = FALSE, legend = FALSE)}
+p2 <- function() {
+    par(mar = rep(0, 4))
+    plot(habitat_refined, axes = FALSE, box = FALSE, legend = FALSE)}
+
+legend_lc <- ggplot() + 
+    geom_raster(
+        data = data.frame(rst = as.factor(coltab(habitat_lv2)[[1]][, 1]),
+                          x = 1:length(cols),
+                          y = 1:length(cols)), 
+        aes(x = x, y = y, 
+            fill = rst)) +
+    scale_fill_manual('',
+                      values = cols, 
+                      breaks = coltab(habitat_lv2)[[1]][, 1],
+                      labels = clr[, 5]) +
+    theme(legend.position = 'bottom',
+          text = element_text(size = 8),
+          legend.text = element_text(size = 8))+
+    guides(fill = guide_legend(ncol = 2))
+legend_lc <- get_legend(legend_lc)
+
+ggarrange(NULL, ggarrange(ggdraw(p1), ggdraw(p2), nrow = 1, ncol = 2,
+          labels = c("A", "B"), vjust=6), NULL, legend_lc, NULL, nrow = 5, 
+          heights = c(-0.4, 4, 2.5, 0.5, 3))
+
+ggsave("figures/S5_habitat_type.png",
+       bg = "white",
+       width = 8, height = 11.2, dpi = 500)
+```
+
+## Landscape connectivity
+
+### Table S2
+
+Selected species to estimate landscape connectivity. This is not the table itself, but get all necessary elements to generate Table S2.
+
+```{r}
+conn_dir <- "data/connectivity"
+selected_species <- read.csv(file.path(conn_dir, "select_species.csv"))
+sdm_eval <- read.csv(file.path(conn_dir, "multi_species_sdm_eval.csv"))
+tb <- full_join(selected_species, sdm_eval, by = c("sci_name" = "species")) %>% 
+    select(sci_name, category, pup_trend, KAPPA, TSS, ROC)
+
+vars <- rast(file.path(conn_dir, "variables/variables.tif")) %>% names()
+```
+
+### Figure S6
+
+```{r}
+suitability <- rast(file.path(conn_dir, "circuit/suitability.asc"))
+pas <- read_sf(file.path(conn_dir, "circuit/pas_selected.geojson")) %>% select()
+
+ggplot() +
+    geom_spatraster(data = suitability, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+            name = "Suitability (0-1)",
+            palette = "Plasma", na.value = NA,
+            guide = guide_colourbar(
+                title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = pas, color = "white", show.legend = FALSE,
+            fill = "transparent", linewidth = 0.4) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(-1, -0.5, 0, -0.5), "cm"),
+          legend.position = "bottom",
+          legend.box.just = "left",
+          legend.box = "vertical")
+
+ggsave("figures/S6_species_suitability.png",
+       bg = "white", width = 3.5, height = 4.2, dpi = 500)
+```
+
+## Biodiversity index
+
+### Table S3
+
+Information of species to calculate biodiversity.
+
+```{r}
+bio_dir <- "data/biodiversity"
+species_info <- read.csv(file.path(bio_dir, "species_info.csv")) %>% 
+    filter(tanzania_range_size > 0)
+
+# Numbers
+species_info %>% group_by(taxon) %>% summarise(n = n())
+
+# Endemic species numbers
+species_info %>% filter(outside_range_size == 0) %>% 
+    group_by(taxon) %>% summarise(n = n())
+
+# Get median values
+species_info %>% group_by(taxon) %>% 
+    summarise(median = median(refined_range_size))
+
+species_info %>% group_by(taxon) %>% 
+    summarise(median = median(range_size))
+```
+
+### Figure S7
+
+Weighted species richness and rarity-weighted species richness.
+
+```{r}
+# Only use weighted
+fnames <- list.files(bio_dir, pattern = "*weighted*", full.names = TRUE)
+
+# Calculate species component
+normalize <- function(x, robust = TRUE) {
+    if (robust) {
+        stretch(x, minv = 0, maxv = 1, minq = 0.01, maxq = 0.99)
+    } else {
+        (x - minmax(x)[1]) / (minmax(x)[2] - minmax(x)[1])
+    }
+}
+
+# Richness
+richness_fns <- fnames[!grepl("rarity", fnames)]
+richness_layers <- do.call(
+    c, lapply(richness_fns, function(fn){
+        normalize(rast(fn) %>% mask(bry))}))
+names(richness_layers) <- c("Amphibians", "Birds", "Mammals", "Reptiles")
+richness <- richness_layers %>% mean() %>% normalize(FALSE)
+
+endemism_fns <- fnames[grepl("rarity", fnames)]
+# Use robust scaling to avoid the impacts of outliers
+endemism_layers <- do.call(
+    c, lapply(endemism_fns, function(fn){
+        normalize(sqrt(sqrt(rast(fn) %>% mask(bry))))}))
+names(endemism_layers) <- c("Amphibians", "Birds", "Mammals", "Reptiles")
+endemism <- endemism_layers %>% mean() %>% normalize(FALSE)
+
+## Plot
+p1 <- ggplot() +
+    geom_spatraster(data = richness, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+        name = "Normalized value (0-1)",
+        palette = "Plasma", na.value = NA,
+        guide = guide_colourbar(
+            title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(size = 12),
+          legend.text = element_text(size = 12),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          legend.position = "bottom",
+          legend.box = "vertical")
+
+fig_list <- lapply(c("Mammals", "Birds", "Amphibians", "Reptiles"),
+                   function(nm){
+    richness_layer <- richness_layers[[nm]]
+    
+    ggplot() +
+        geom_spatraster(data = richness_layer, na.rm = TRUE) +
+        scale_fill_continuous_sequential(
+            name = "Normalized value (0-1)",
+            palette = "Plasma", na.value = NA,
+            guide = guide_colourbar(
+                title.position = "top", title.hjust = 0.5)) +
+        geom_sf(data = bry, color = "black", 
+                fill = "transparent", linewidth = 0.6) +
+        ggtitle(nm) + 
+        coord_sf() + theme_void() +
+        theme(text = element_text(size = 12),
+              plot.title = element_text(hjust = 0.5, face = "bold"),
+              plot.margin = unit(c(0, 0, 0, 0), "cm"),
+              legend.position = "none")
+})
+p2 <- ggarrange(plotlist = fig_list, nrow = 2, ncol = 2)
+
+p3 <- ggplot() +
+    geom_spatraster(data = endemism, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+        name = "Normalized value (0-1)",
+        palette = "Plasma", na.value = NA,
+        guide = guide_colourbar(
+            title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(size = 12),
+          legend.text = element_text(size = 12),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          legend.position = "bottom",
+          legend.box = "vertical")
+
+fig_list <- lapply(c("Mammals", "Birds", "Amphibians", "Reptiles"),
+                   function(nm){
+    endemism_layer <- endemism_layers[[nm]]
+    
+    ggplot() +
+        geom_spatraster(data = endemism_layer, na.rm = TRUE) +
+        scale_fill_continuous_sequential(
+            name = "Normalized value (0-1)",
+            palette = "Plasma", na.value = NA,
+            guide = guide_colourbar(
+                title.position = "top", title.hjust = 0.5)) +
+        geom_sf(data = bry, color = "black", 
+                fill = "transparent", linewidth = 0.6) +
+        ggtitle(nm) + 
+        coord_sf() + theme_void() +
+        theme(text = element_text(size = 12),
+              plot.title = element_text(hjust = 0.5, face = "bold"),
+              plot.margin = unit(c(0, 0, 0, 0), "cm"),
+              legend.position = "none")
+})
+p4 <- ggarrange(plotlist = fig_list, nrow = 2, ncol = 2)
+
+g1 <- ggarrange(p1 + theme(legend.position = "none"), p2, nrow = 1, ncol = 2) +
+    theme(panel.background = element_rect(fill = "lightgrey", color = "lightgrey"))
+
+g2 <- ggarrange(p3 + theme(legend.position = "none"), p4, nrow = 1, ncol = 2)
+
+ggarrange(g1, g2, get_legend(p1), nrow = 3, ncol = 1,
+          labels = c("A", "B", ""), heights = c(1, 1, 0.15))
+
+ggsave("figures/S7_species_richness.png",
+       bg = "white",
+       width = 7.5, height = 7.6, dpi = 500)
+```
+
+### Figure S8
+
+```{r}
+bhi_msa_bii <- rast(file.path(bio_dir, "bhi_msa_bii.tif"))
+bhi_msa_bii <- mask(bhi_msa_bii, bry)
+
+fig_list <- lapply(names(bhi_msa_bii), function(nm){
+    lyr <- bhi_msa_bii[[nm]]
+    
+    ggplot() +
+    geom_spatraster(data = lyr, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+        name = "Value (0-1)",
+        palette = "Plasma", na.value = NA,
+        guide = guide_colourbar(
+            title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+          legend.text = element_text(size = 12),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          legend.position = "bottom",
+          legend.box = "vertical")
+})
+
+ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
+          labels = c("A", "B", "C"))
+
+ggsave("figures/S8_ecological_index.png",
+       bg = "white",
+       width = 7, height = 3, dpi = 500)
+```
+
+### Figure S9
+
+```{r}
+carbon_dir <- "data/carbon"
+abv_bms <- rast(file.path(carbon_dir, "aboveground_biomass.tif"))
+blw_bms <- rast(file.path(carbon_dir, "belowground_biomass.tif"))
+soct_1m <- rast(file.path(carbon_dir, "ocs_1m_sg.tif")) %>% 
+    resample(abv_bms)
+
+carbons <- c(abv_bms, blw_bms, soct_1m)
+names(carbons) <- c("Aboveground biomass", "Belowground biomass", 
+                    "Soil carbon stocks")
+carbons <- mask(carbons, bry)
+
+fig_list <- lapply(names(carbons), function(nm){
+    lyr <- carbons[[nm]]
+    
+    ggplot() +
+    geom_spatraster(data = lyr, na.rm = TRUE) +
+    scale_fill_continuous_sequential(
+        name = "Carbon density (t/ha)",
+        palette = "Plasma", na.value = NA,
+        guide = guide_colourbar(
+            title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = bry, color = "black", 
+            fill = "transparent", linewidth = 0.6) +
+    coord_sf() + theme_void() +
+    theme(text = element_text(size = 12),
+          strip.text.x = element_text(size = 12),
+          plot.title = element_text(hjust = 0.5, size = 12, face = "bold"),
+          legend.text = element_text(size = 12),
+          legend.spacing.y = unit(0.1, 'cm'),
+          legend.margin = margin(rep(0, 4)), 
+          legend.key.height = unit(0.4, 'cm'),
+          legend.key.width = unit(0.8, 'cm'),
+          plot.margin = unit(c(0, 0, 0, 0), "cm"),
+          legend.position = "bottom",
+          legend.box = "vertical")
+})
+
+ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
+          labels = c("A", "B", "C"))
+
+ggsave("figures/S9_carbons.png",
+       bg = "white",
+       width = 7, height = 3, dpi = 500)
+```
+

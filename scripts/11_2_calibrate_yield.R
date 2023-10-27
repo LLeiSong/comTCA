@@ -136,24 +136,91 @@ fao_yield_pred <- data.frame(
 # so we calibrate the cassava yield by multiplying a factor
 fao_yield_pred[4, 3] <- fao_yield_pred[4, 3] * (8.4 / fao_yield_pred[4, 2])
 
+yields_calib_qts <- do.call(rbind, lapply(names_cov$name, function(crp){
+    message(sprintf("Calibdate crop %s", crp))
+    # Only use rainfed
+    yields_crp <- yields[[crp]]
+    
+    ## Get the best match quantile value with surveys.
+    do.call(rbind, lapply(unique(regions$Region), function(rg){
+        ply <- regions %>% filter(Region == rg)
+        yield_rg <- crop(yields_crp, ply) %>% mask(ply)
+        farmland_rg <- crop(farmland, ply) %>% mask(ply)
+        
+        # Step 2: get real yield
+        real_yield <- nsca_yield %>% filter(Region == rg) %>% 
+            filter(Season == "both") %>% 
+            filter(Crop == crp) %>% pull(Yield)
+        
+        if (is.na(real_yield)){
+            # get the median if no real yield report
+            best_quantile <- 'prediction.quantile..0.5'
+        } else {
+            # Get the best match quantile
+            yield_rg_msk <- mask(yield_rg, farmland_rg)
+            best_quantile <- global(yield_rg_msk, mean, na.rm = TRUE) %>% 
+                data.frame() %>% rename(yield = mean) %>% 
+                mutate(quantile = row.names(.)) %>% 
+                mutate(residual = abs(yield - real_yield)) %>% 
+                filter(residual == min(residual)) %>% slice(1) %>% pull(quantile)
+        }
+        
+        # Extract the best match layer
+        data.frame(region = rg, quantile = best_quantile)
+    })) %>% mutate(crop = crp)
+}))
+
+# Assume the yield increase degree would be the same comparing to themselves
+# this also can make sure the results are consistent with current yield
 yields_atn <- do.call(c, lapply(names_cov$name, function(crp){
     # Only use rainfed
     yields_crp <- yields[[crp]]
     
+    # Extract district-level quantile for current yield
+    current_qts <- yields_calib_qts %>% filter(crop == crp) %>% 
+        mutate(qt_num = as.numeric(str_extract(quantile, "0.[0-9]+")))
+    
     # Get the best match quantile
     fao_yield <- fao_yield_pred %>% filter(Crop == crp) %>% pull(Predicted_yield)
-    yields_crp_msk <- mask(yields_crp, farmland)
-    best_quantile <- global(yields_crp_msk, mean, na.rm = TRUE) %>% 
-        data.frame() %>% rename(yield = mean) %>% 
-        mutate(quantile = row.names(.)) %>% 
-        mutate(residual = abs(yield - fao_yield)) %>% 
-        filter(residual == min(residual)) %>% slice(1) %>% pull(quantile)
     
-    subset(yields_crp, best_quantile)
+    # Start from 0.6 quantile and add 0.05 each time for all districts to find
+    # the best match add-on
+    best_addon <- do.call(rbind, lapply(0.05 * 1:7, function(addon){
+        lyr <- do.call(merge, lapply(unique(regions$Region), function(rg){
+            ply <- regions %>% filter(Region == rg)
+            yield_rg <- crop(yields_crp, ply) %>% mask(ply)
+            farmland_rg <- crop(farmland, ply) %>% mask(ply)
+            
+            # Get the best match quantile
+            yield_rg_msk <- mask(yield_rg, farmland_rg)
+            qtn <- current_qts %>% filter(region == rg) %>% pull(qt_num) + addon
+            qtn <- min(qtn, 0.95)
+            qtn <- sprintf("prediction.quantile..%.4g", qtn)
+            
+            # Extract the best match layer
+            subset(yield_rg_msk, qtn)
+        }))
+        
+        est_yield <- global(lyr, mean, na.rm = TRUE)
+        data.frame(addon = addon, estimated_yield = est_yield)
+    })) %>% mutate(residual = abs(mean - fao_yield)) %>% 
+        filter(residual == min(residual)) %>% slice(1) %>% pull(addon)
+    
+    # Add to current yield to get the attainable yield
+    atn_qts <- current_qts %>% mutate(qt_num = qt_num + best_addon) %>% 
+        mutate(qt_num = ifelse(qt_num > 0.95, 0.95, qt_num))
+    do.call(merge, lapply(unique(regions$Region), function(rg){
+        ply <- regions %>% filter(Region == rg)
+        yield_rg <- crop(yields_crp, ply) %>% mask(ply)
+        
+        # Get the best match quantile
+        qtn <- atn_qts %>% filter(region == rg) %>% pull(qt_num)
+        qtn <- sprintf("prediction.quantile..%.4g", qtn)
+        
+        # Extract the best match layer
+        subset(yield_rg, qtn)
+    }))
 }))
-
-# Extract the selected quantiles
-atn_quantiles <- names(yields_atn)
 names(yields_atn) <- names_cov$name
 
 # Check the statistics
@@ -162,8 +229,6 @@ global(yields_atn, mean, na.rm = TRUE)
 # Save out
 fname <- file.path(data_dir, "yield_attainable_5crops_tz_1km.tif")
 writeRaster(yields_atn, fname, overwrite = TRUE)
-
-save(atn_quantiles, file = file.path(data_dir, "quantiles_attainable_yield.rda"))
 
 # Check yield calibrated result
 library(ggplot2)

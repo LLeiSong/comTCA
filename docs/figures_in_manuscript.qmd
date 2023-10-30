@@ -22,6 +22,7 @@ sf_use_s2(FALSE)
 # Paths
 agro_dir <- "data/agriculture"
 lc_dir <- "data/landcover"
+tdf_dir <- "data/tradeoff"
 
 # Study area
 bry <- read_sf("data/geoms/mainland_tanzania.geojson") %>% 
@@ -140,6 +141,207 @@ ggplot() +
 ggsave("figures/figure1_study_area.png",
        bg = "white",
        width = 3.5, height = 4.5, dpi = 500)
+```
+
+## Results
+### Figure 2
+
+```{r}
+f_dir <- "results/scenarios"
+items <- c("Y", "B", "Ca", "Co", "D", "hybrid")
+simu_mean <- do.call(rbind, lapply(items, function(item){
+    read.csv(sprintf("%s/%s_simulation_mean.csv", f_dir, item)) %>% 
+        mutate(mod = item)
+})) %>% mutate(mod = factor(mod, levels = c("Y", "B", "Ca", "Co", "D", "hybrid"),
+                            labels = c("Y", "B", "Ca", "Co", "D", "Hybrid")))
+
+simu_sd <- do.call(rbind, lapply(items, function(item){
+    read.csv(sprintf("%s/%s_simulation_sd.csv", f_dir, item)) %>% 
+        mutate(mod = item)
+})) %>% mutate(mod = factor(mod, levels = c("Y", "B", "Ca", "Co", "D", "hybrid"),
+                            labels = c("Y", "B", "Ca", "Co", "D", "Hybrid")))
+
+prod_gain_intense <- read.csv(
+    file.path(tdf_dir, "production_gain_from_intensifify.csv"))
+pgi_mean <- mean(prod_gain_intense$Production_gain) / 1e7
+pgi_sd <- sd(prod_gain_intense$Production_gain) / 1e7
+
+fig_list <- lapply(names(simu_mean)[2:6], function(ele){
+    vals <- simu_mean %>% select(all_of(c("farmable_ratio", "mod", ele))) %>% 
+        mutate(sd = simu_sd %>% 
+                   select(all_of(c("farmable_ratio", "mod", ele))) %>%
+                   pull(all_of(ele)))
+    names(vals)[3:4] <- c("value", "sd")
+    vals$farmable_ratio <- vals$farmable_ratio / 1e6
+    
+    # Separate different conditions
+    if (str_detect(ele, "Production")){
+        vals$value <- vals$value / 1e7 + pgi_mean
+        vals$sd <- vals$sd / 1e7
+        ylab_nm <- expression(paste("Production gain (tons * ", 10^7, ")"))
+    } else if (str_detect(ele, "Biodiversity")) {
+        vals$value <- vals$value / 1e5
+        vals$sd <- vals$sd / 1e5
+        ylab_nm <- expression(paste("Biodiversity loss (", 10^5, ")"))
+    } else if (str_detect(ele, "Carbon")){
+        vals$value <- vals$value / 1e7
+        vals$sd <- vals$sd / 1e7
+        ylab_nm <- expression(paste("Carbon loss (tons * ", 10^7, ")"))
+    } else if (str_detect(ele, "Connectivity")){
+        vals$value <- vals$value / 1e5
+        vals$sd <- vals$sd / 1e5
+        ylab_nm <- expression(paste("Connectivity loss (", 10^5, ")"))
+    } else {
+        vals$value <- vals$value / 1e8
+        vals$sd <- vals$sd / 1e8
+        ylab_nm <- expression(paste("Cost distance increase (", 10^8, ")"))
+    }
+    
+    p <- ggplot(vals, aes(x = farmable_ratio, y = value)) + 
+        geom_ribbon(aes(ymin = value - sd, ymax = value + sd, fill = mod), 
+                    alpha = 0.2) +
+        geom_line(aes(color = mod)) + 
+        scale_color_manual(
+            "Optimize to", values = c("#E69F00", "#009E73", "#D55E00", 
+                                   "#0072B2", "#999999", "#000000"),
+            labels = c("Yield", "Biodiversity", "Carbon", "Connectivity", 
+                       "Cost distance", "Hybrid"), 
+            aesthetics = c("colour", "fill"))
+    
+    if (str_detect(ele, "Production")){
+        p <- p + geom_point(aes(x = min(farmable_ratio), y = pgi_mean), size = 0.8) +
+            geom_errorbar(aes(x = min(farmable_ratio), y = pgi_mean,
+                              ymin = pgi_mean - pgi_sd, ymax = pgi_mean + pgi_sd), 
+                          width = .2, position = position_dodge(0.05)) + 
+            annotate(geom = "text", x = 0.25, hjust = 0, size = 2.1,
+                     y = pgi_mean, label = "Production gain from existing cropland")
+    }
+    
+    p + xlab(expression(paste("Expansion in cropland (ha * ", 10^6, ")"))) +
+        ylab(ylab_nm) + theme_bw() +
+        theme(text = element_text(size = 10),
+              legend.text = element_text(size = 12),
+              legend.title = element_text(size = 12),
+              legend.key.height = unit(0.8, 'cm'),
+              legend.key.width = unit(0.8, 'cm'),
+              legend.position = "none",
+              plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm"))
+})
+
+legend <- get_legend(fig_list[[1]] + theme(legend.position = "right"))
+
+ggarrange(fig_list[[1]], fig_list[[2]], fig_list[[3]], 
+          fig_list[[4]], fig_list[[5]], legend, nrow = 2, ncol = 3,
+          labels = c("A", "B", "C", "D", "E", ""))
+
+ggsave("figures/figure2_scenarios.png",
+       bg = "white",
+       width = 7.4, height = 5.5, dpi = 500)
+```
+
+### Figure 3
+
+```{r}
+f_dir <- "results/compare"
+items <- c("RG", "HY", "CS")
+
+prod_gain_intense <- read.csv(
+    file.path(tdf_dir, "production_gain_from_intensifify.csv"))
+pgi_mean_rg <- mean(prod_gain_intense$Production_gain) / 1e7
+pgi_sd_rg <- sd(prod_gain_intense$Production_gain) / 1e7
+
+prod_gain_intense <- read.csv(
+    file.path(tdf_dir, "production_gain_from_intensifify_150.csv"))
+pgi_mean_hy <- mean(prod_gain_intense$Production_gain) / 1e7
+pgi_sd_hy <- sd(prod_gain_intense$Production_gain) / 1e7
+
+prod_gain_intense <- read.csv(
+    file.path(tdf_dir, "production_gain_from_intensifify_more_cassava.csv"))
+pgi_mean_cs <- mean(prod_gain_intense$Production_gain) / 1e7
+pgi_sd_cs <- sd(prod_gain_intense$Production_gain) / 1e7
+
+simu_mean <- do.call(rbind, lapply(items, function(item){
+    tb <- read.csv(sprintf("%s/%s_hybrid_mean.csv", f_dir, item)) %>% 
+        mutate(mod = item)
+    if (item == "RG"){
+        tb %>% mutate(Production_gain = Production_gain / 1e7 + pgi_mean_rg)
+    } else if (item == "HY"){
+        tb %>% mutate(Production_gain = Production_gain / 1e7 + pgi_mean_hy)
+    } else {
+        tb %>% mutate(Production_gain = Production_gain / 1e7 + pgi_mean_cs)
+    }
+})) %>% mutate(mod = factor(mod, levels = items, labels = items))
+
+simu_sd <- do.call(rbind, lapply(items, function(item){
+    read.csv(sprintf("%s/%s_hybrid_sd.csv", f_dir, item)) %>% 
+        mutate(mod = item) %>% 
+        mutate(Production_gain = Production_gain / 1e7)
+})) %>% mutate(mod = factor(mod, levels = items, labels = items))
+
+vals <- simu_mean %>% select(c("farmable_ratio", "mod", "Production_gain")) %>% 
+        mutate(sd = simu_sd %>% pull("Production_gain"))
+vals$farmable_ratio <- vals$farmable_ratio / 1e6
+
+p1 <- ggplot(vals, aes(x = farmable_ratio, y = Production_gain)) + 
+    geom_ribbon(aes(ymin = Production_gain - sd, ymax = Production_gain + sd, fill = mod), 
+                alpha = 0.2) +
+    geom_line(aes(color = mod)) + 
+    scale_color_manual(
+        "", values = c("#009E73", "#D55E00", "#0072B2"),
+        labels = c("A", 'B', "C"), 
+        aesthetics = c("colour", "fill")) +
+    geom_point(aes(x = min(farmable_ratio), y = pgi_mean_rg), color = "#009E73", size = 0.8) +
+    geom_point(aes(x = min(farmable_ratio), y = pgi_mean_hy), color = "#D55E00", size = 0.8) +
+    geom_point(aes(x = min(farmable_ratio), y = pgi_mean_cs), color = "#0072B2", size = 0.8) +
+    xlab(expression(paste("Expansion in cropland (ha * ", 10^6, ")"))) +
+    ylab(expression(paste("Production gain (tons * ", 10^7, ")"))) + 
+    theme_bw() +
+    theme(text = element_text(size = 8),
+          legend.text = element_text(size = 8),
+          legend.title = element_text(size = 8),
+          legend.key.height = unit(0.3, 'cm'),
+          legend.key.width = unit(0.3, 'cm'),
+          legend.margin = margin(0,0,0,0),
+          legend.box.margin=margin(0,0,-5,0),
+          legend.position = "top",
+          plot.margin = unit(rep(0.1, 4), "cm"))
+
+# Maps
+f_dir <- "results/spatial"
+items <- c("RG", "HY", "CS")
+
+fig_list <- lapply(items, function(item){
+    lyr <- rast(file.path(f_dir, sprintf("fut_agro_land_hybrid_%s.tif", item)))
+    lyr[is.na(lyr)] <- 0
+    lyr <- (lyr$maize > 95) * 1 + (lyr$paddy > 95) * 2 + (lyr$sorghum > 95) * 3 +
+        (lyr$cassava > 95) * 4 + (lyr$beans > 95) * 5
+    lyr[lyr == 0] <- NA
+    
+    cls <- data.frame(id = 1:5, cover = c("Maize", "Rice", "Sorghum", "Cassava", "Beans"))
+    levels(lyr) <- cls
+    
+    ggplot() +
+        geom_spatraster(data = lyr, na.rm = TRUE) +
+        scale_fill_manual(
+            name = "Suggested crop", na.translate = FALSE,
+            values = c("#E69F00", "#009E73", "#D55E00", "#0072B2", "darkgrey")) +
+        geom_sf(data = bry, color = "black", 
+                fill = "transparent", linewidth = 0.4) +
+        coord_sf() + theme_void() +
+        theme(text = element_text(size = 8),
+              legend.text = element_text(size = 8),
+              plot.margin = unit(c(0, 0, 0, 0), "cm"))
+})
+
+ggarrange(
+    p1, ggarrange(fig_list[[1]], fig_list[[2]], fig_list[[3]], nrow = 1, ncol = 3,
+                  labels = c("A", "B", "C"), hjust = -4, 
+                  common.legend = TRUE, legend = "right"),
+    nrow = 1, ncol = 2, widths = c(1, 4))
+
+ggsave("figures/figure3_practices.png",
+       bg = "white",
+       width = 7.4, height = 2, dpi = 500)
 ```
 
 ## Agricultural yield

@@ -113,7 +113,7 @@ downscale_yield <- function(yield, variables, variables_to){
     
     # Make prediction for training variables
     pred_qt <- predict(rf_model, vals[, -1], type = "quantiles",
-                       quantiles = seq(0.05, 0.95, 0.05))
+                       quantiles = seq(0.05, 0.95, 0.01))
     pred_qt <- cbind(vals['yield'], pred_qt$predictions) %>% data.frame()
     fname <- file.path(data_dir, sprintf("yield_05_95_%s_R_1km.csv", names(yield)))
     write.csv(pred_qt, fname, row.names = FALSE)
@@ -121,7 +121,7 @@ downscale_yield <- function(yield, variables, variables_to){
     names(variables_to) <- gsub("-", ".", names(variables_to))
     yield_qt <- predict(
         subset(variables_to, features), rf_model, 
-        type = "quantiles", quantiles = seq(0.05, 0.95, 0.05), na.rm = TRUE)
+        type = "quantiles", quantiles = seq(0.05, 0.95, 0.01), na.rm = TRUE)
     
     fname <- file.path(data_dir, sprintf("yield_05_95_%s_R_1km.tif", names(yield)))
     writeRaster(yield_qt, fname)
@@ -176,4 +176,4 @@ ggarrange(
     plotlist = fig_list,
     labels = c("A", "B", "C", "D", "E"),
     ncol = 3, nrow = 2, common.legend = TRUE, legend = "bottom")
-ggsave("figures/S1_eval_yield_downscale.png", width = 8, height = 6, bg = "white")
+ggsave("figures/S2_eval_yield_downscale.png", width = 8, height = 6, bg = "white")

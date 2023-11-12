@@ -68,7 +68,7 @@ fnames_dc <- list.files(
 fnames <- intersect(fnames, fnames_dc); rm(fnames_dc)
 
 ## Filter species with desired area
-## Assume if a habitat is too small (1%), then better to set up protected area to
+## Assume if a habitat is too small (5%), then better to set up protected area to
 ## protect them.
 tz_area <- rast(fnames[1])
 tz_area <- subst(tz_area, NA, 0)

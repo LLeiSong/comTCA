@@ -7,8 +7,13 @@
 ##
 ## Copyright (c) Lei Song, 2023
 ## Email: lsong@ucsb.edu
+## Compare scenarios:
+## crop production: only yield, weighted by current cropland area
+## biodiversity
+## carbon
+## connectivity
+## hybrid
 ## --------------------------------------------
-## # exp_gain = atn_yield * farmable_land
 
 # Load libraries
 library(terra)
@@ -26,7 +31,7 @@ land_allocate_quick <- function(
         mod = "hybrid",
         cbetas, # the prefer factor for each weight, the first one is for yield
         shift = "RG", # HY for 150% yield, CS for increase cassava plant area, or HYSC for both, RG for regular.
-        production_need = 13444968, # double the current production, 8407609 for 150% gap close
+        production_need = 10943841, # triple the current production
         seed = 123,
         dst_dir){
     
@@ -111,7 +116,7 @@ land_allocate_quick <- function(
 
 # Set directories
 tdf_dir <- "/scratch/lsong36/comTCA/data/tradeoff"
-dst_dir <- "/scratch/lsong36/comTCA/data/scenarios"
+dst_dir <- "/scratch/lsong36/comTCA/results/scenarios"
 if (!dir.exists(dst_dir)) dir.create(dst_dir)
 
 option_list <- list(
@@ -132,11 +137,15 @@ shift <- opt$shift
 # Mask out the protected areas
 pas <- rast(file.path(tdf_dir, "protected_areas.tif"))
 pas[pas == 1] <- NA
+
+# Get specific cell sizes, the same for all layers
+cellsizes <- cellSize(pas) / 1e6 * 100
+
 farmable_area <- file.path(tdf_dir, "farmable_perc.tif") %>% 
-    rast() %>% mask(pas) * 100
+    rast() %>% mask(pas) * cellsizes
 farmable_area[farmable_area <= 0] <- NA
 cropland <- file.path(tdf_dir, "cropland_perc.tif") %>% 
-    rast() %>% mask(pas) * 100
+    rast() %>% mask(pas) * cellsizes
 # Only these units will be evaluated
 
 # Gather all inputs and standardize them
@@ -165,19 +174,25 @@ names(global_weights) <- c("Cropland coverage")
 
 # Get the production increase from land expansion for each pixel
 # intes_gain = (atn_yield - current_yield) * current_land
-if (str_detect(shift, "HY")){
+if (shift == "HY"){
     atn_yields <- rast(file.path(tdf_dir, "agro_attainable_yield_150.tif")) %>% 
         mask(farmable_area)
-    production_need <- 8407609
-} else if (str_detect(shift, "CS")){
+    prod_intes <- read.csv(file.path(tdf_dir, "production_gain_from_intensifify_150.csv"))
+} else if (shift == "CS"){
     atn_yields <- rast(file.path(tdf_dir, "agro_attainable_yield.tif")) %>% 
         mask(farmable_area)
-    production_need <- 3124226
+    prod_intes <- read.csv(file.path(tdf_dir, "production_gain_from_intensifify_more_cassava.csv"))
+} else if (shift == "HYCS"){
+    atn_yields <- rast(file.path(tdf_dir, "agro_attainable_yield_150.tif")) %>% 
+        mask(farmable_area)
+    prod_intes <- read.csv(file.path(tdf_dir, "production_gain_from_intensifify_150_more_cassave.csv"))
 } else {
     atn_yields <- rast(file.path(tdf_dir, "agro_attainable_yield.tif")) %>% 
         mask(farmable_area)
-    production_need <- 13444968
+    prod_intes <- read.csv(file.path(tdf_dir, "production_gain_from_intensifify.csv"))
 }
+
+production_need <- mean(prod_intes$Current_production) * 2 - mean(prod_intes$Attainable_production)
 
 # Set the factors
 if (mod == "Y"){

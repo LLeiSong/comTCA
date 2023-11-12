@@ -284,7 +284,7 @@ command <- sprintf(
     eq_string, options_int)
 system(command)
 
-## The 1406: plantation class is not trustable at all.
+## The 1403: plantation class is not trustable at all.
 ## So update it based on https://doi.org/10.3390/rs13163081.
 ## NOTE: this mask can always been updated with better available product.
 

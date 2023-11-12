@@ -17,6 +17,7 @@ library(colorspace)
 library(stars)
 library(rnaturalearth)
 library(ggfx)
+library(stringr)
 sf_use_s2(FALSE)
 
 # Paths
@@ -50,6 +51,7 @@ color_table <- do.call(rbind, lapply(color_table, function(line){
     value <- items[str_detect(items, "value")]
     value <- as.numeric(gsub('[^[:alnum:] ]|value','', value))
     data.frame(value = value, color = color, label = label)}))
+color_table$label[2] <- "Forest/dense tree"
 
 landcover <- rast(file.path(lc_dir, "landcover_tz_1km.tif")) %>% 
     project("epsg:4326", method = "near") %>% 
@@ -77,8 +79,6 @@ pas <- pas %>%
 pas <- pas %>% 
     slice(unique(unlist(st_intersects(bry, pas)))) %>% 
     st_simplify()
-pas <- rasterize(pas, habitats) %>% 
-    as.polygons() %>% st_as_sf()
 
 # Make the figure
 ## Overview
@@ -94,7 +94,7 @@ overview <- ggplotGrob(ggplot() +
                 color = 'black', linewidth = 0.3),
         sigma = 1, x_offset = 10, y_offset = 10) +
     geom_sf(data = bry, fill = 'orange', 
-            color = 'black', linewidth = 0.3) +
+            color = 'grey', linewidth = 0.3) +
     coord_sf(xlim = c(-17.892, 51.892), 
              ylim = c(-35.321, 37.715)) +
     theme_transparent() +
@@ -119,7 +119,7 @@ ggplot() +
     geom_sf(data = bry, aes(color = "Mainland Tanzania"), 
             fill = "transparent", linewidth = 0.6) +
     scale_color_manual(
-        NULL, values = c("grey20", "black"),
+        NULL, values = c("grey", "black"),
         breaks = c("Mainland Tanzania", 'Protected areas'),
         guide = guide_legend(order = 2)) +
     annotation_custom(grob = overview, 
@@ -344,9 +344,75 @@ ggsave("figures/figure3_practices.png",
        width = 7.4, height = 2, dpi = 500)
 ```
 
+### Figure 3
+
+To show the significance of productivity growth on existing cropland.
+
+```{r}
+fnames <- list.files("results/intensification", full.names = TRUE)
+vals <- do.call(rbind, lapply(fnames, function(fname){
+    params <- as.numeric(str_extract_all(fname, "[0-9]+")[[1]])
+    vals <- read.csv(fname) %>% pull(Production_gain)
+    data.frame(cassava = params[1], yield = params[2], 
+               land_usage = params[3], mean = mean(vals),
+               sd = sd(vals))
+}))
+
+# Figure for cassava increase
+g1 <- ggplot(data = vals %>% filter(yield == 100),
+       aes(y = mean/1e7, x=cassava, color = factor(land_usage))) +
+    geom_hline(yintercept = 12572439/1e7, linetype = "dashed", color = "grey") + 
+    geom_point() + geom_line() + ylim(0, max(vals$mean)/1e7) +
+    annotate(geom = "text", x = 3, size = 2.5,
+                     y = 12002439/1e7, label = "Double the current production") +
+    scale_colour_brewer("Land usage (%)", palette = "Dark2") +
+    geom_errorbar(aes(ymin = (mean - sd)/1e7, ymax = (mean + sd)/1e7), width=.1) +
+    xlab("Increase (fold) in planted area of cassava") +
+    ylab(expression(paste("Productivity growth (", 10^7, "tons)"))) +
+    theme_classic()+
+    theme(text = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.title = element_text(size = 10),
+          legend.key.height = unit(0.3, 'cm'),
+          legend.key.width = unit(0.3, 'cm'),
+          legend.margin = margin(rep(0.1, 4)),
+          legend.box.margin = margin(rep(0.2, 4)),
+          legend.position = "top",
+          plot.margin = unit(rep(0.1, 4), "cm"))
+
+g2 <- ggplot(data = vals %>% filter(cassava == 1) %>% filter(yield < 150),
+       aes(y = mean/1e7, x=yield, color = factor(land_usage))) +
+    geom_hline(yintercept = 12572439/1e7, linetype = "dashed", color = "grey") + 
+    geom_point() + geom_line() + ylim(0, max(vals$mean)/1e7) +
+    annotate(geom = "text", x = 120, size = 2.5,
+                     y = 12002439/1e7, label = "Double the current production") +
+    scale_colour_brewer("Land usage (%)", palette = "Dark2") +
+    geom_errorbar(aes(ymin = (mean - sd)/1e7, ymax = (mean + sd)/1e7), width=.1) +
+    xlab("Increase (%) in yield gap close") +
+    ylab(expression(paste("Productivity growth (", 10^7, "tons)"))) +
+    theme_classic()+
+    theme(text = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.title = element_text(size = 10),
+          legend.key.height = unit(0.3, 'cm'),
+          legend.key.width = unit(0.3, 'cm'),
+          legend.margin = margin(rep(0.1, 4)),
+          legend.box.margin = margin(rep(0.2, 4)),
+          legend.position = "top",
+          plot.margin = unit(rep(0.1, 4), "cm"))
+
+ggarrange(g1, g2, nrow = 1, ncol = 2,
+          labels = c("A", "B"), legend = "top",
+          common.legend = TRUE)
+
+ggsave("figures/figure3_prod_growth.png",
+       bg = "white",
+       width = 6, height = 3, dpi = 500)
+```
+
 ## Agricultural yield
 
-### Figure S3
+### Figure S4
 
 Down-scaled and calibrated current yield map of maize (A), rice (B), sorghum (C), cassava (D), and beans (E) at 1 km.
 
@@ -400,7 +466,7 @@ fig_list <- lapply(names(yields_calib), function(nm){
 ggarrange(plotlist = fig_list, nrow = 2, ncol = 3,
           labels = c("A", "B", "C", "D", "E"))
 
-ggsave("figures/S3_current_yields.png",
+ggsave("figures/S4_current_yields.png",
        bg = "white",
        width = 7.5, height = 5.5, dpi = 500)
 ```
@@ -459,7 +525,7 @@ var_summary <- Reduce(full_join, var_summary)
 write.csv(var_summary, "figures/table_s1_selected_vars.csv", row.names = FALSE)
 ```
 
-### Figure S4
+### Figure S5
 
 Attainable yield (predicted 95% quantile of crop yield downscaling model) map at 1 km.
 
@@ -494,14 +560,14 @@ fig_list <- lapply(names(yields_atn), function(nm){
 ggarrange(plotlist = fig_list, nrow = 2, ncol = 3,
           labels = c("A", "B", "C", "D", "E"))
 
-ggsave("figures/S4_attainable_yields.png",
+ggsave("figures/S5_attainable_yields.png",
        bg = "white",
        width = 7.5, height = 5.5, dpi = 500)
 ```
 
 ## Refine species habitat type map and range map
 
-### Figure S5
+### Figure S6
 
 Habitat type map of Tanzania before and after refining.
 
@@ -560,7 +626,7 @@ ggarrange(NULL, ggarrange(ggdraw(p1), ggdraw(p2), nrow = 1, ncol = 2,
           labels = c("A", "B"), vjust=6), NULL, legend_lc, NULL, nrow = 5, 
           heights = c(-0.4, 4, 2.5, 0.5, 3))
 
-ggsave("figures/S5_habitat_type.png",
+ggsave("figures/S6_habitat_type.png",
        bg = "white",
        width = 8, height = 11.2, dpi = 500)
 ```
@@ -581,7 +647,7 @@ tb <- full_join(selected_species, sdm_eval, by = c("sci_name" = "species")) %>%
 vars <- rast(file.path(conn_dir, "variables/variables.tif")) %>% names()
 ```
 
-### Figure S6
+### Figure S7
 
 ```{r}
 suitability <- rast(file.path(conn_dir, "circuit/suitability.asc"))
@@ -610,7 +676,7 @@ ggplot() +
           legend.box.just = "left",
           legend.box = "vertical")
 
-ggsave("figures/S6_species_suitability.png",
+ggsave("figures/S7_species_suitability.png",
        bg = "white", width = 3.5, height = 4.2, dpi = 500)
 ```
 
@@ -640,7 +706,7 @@ species_info %>% group_by(taxon) %>%
     summarise(median = median(range_size))
 ```
 
-### Figure S7
+### Figure S8
 
 Weighted species richness and rarity-weighted species richness.
 
@@ -768,12 +834,12 @@ g2 <- ggarrange(p3 + theme(legend.position = "none"), p4, nrow = 1, ncol = 2)
 ggarrange(g1, g2, get_legend(p1), nrow = 3, ncol = 1,
           labels = c("A", "B", ""), heights = c(1, 1, 0.15))
 
-ggsave("figures/S7_species_richness.png",
+ggsave("figures/S8_species_richness.png",
        bg = "white",
        width = 7.5, height = 7.6, dpi = 500)
 ```
 
-### Figure S8
+### Figure S9
 
 ```{r}
 bhi_msa_bii <- rast(file.path(bio_dir, "bhi_msa_bii.tif"))
@@ -808,12 +874,12 @@ fig_list <- lapply(names(bhi_msa_bii), function(nm){
 ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
           labels = c("A", "B", "C"))
 
-ggsave("figures/S8_ecological_index.png",
+ggsave("figures/S9_ecological_index.png",
        bg = "white",
        width = 7, height = 3, dpi = 500)
 ```
 
-### Figure S9
+### Figure S10
 
 ```{r}
 carbon_dir <- "data/carbon"
@@ -856,7 +922,7 @@ fig_list <- lapply(names(carbons), function(nm){
 ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
           labels = c("A", "B", "C"))
 
-ggsave("figures/S9_carbons.png",
+ggsave("figures/S10_carbons.png",
        bg = "white",
        width = 7, height = 3, dpi = 500)
 ```

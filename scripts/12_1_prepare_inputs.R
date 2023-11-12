@@ -133,9 +133,12 @@ travel_time <- travel_time %>% resample(template) %>%
     mask(template) %>% crop(template)
 writeRaster(travel_time, file.path(tradeoff_dir, "agro_travel_time.tif"))
 
-## 150% yield gap close
-an_yield_150 <- current_yield + (atn_yield - current_yield) * 1.5
-writeRaster(an_yield_150, file.path(tradeoff_dir, "agro_attainable_yield_150.tif"))
+## 110%-150% yield gap close
+for(fct in seq(1.1, 1.5, 0.1)){
+    an_yield_ins <- current_yield + (atn_yield - current_yield) * fct
+    fname <- file.path(tradeoff_dir, sprintf("agro_attainable_yield_%s0.tif", fct*10))
+    writeRaster(an_yield_ins, fname)
+}
 
 # biodiversity
 bio_index <- rast(file.path(bio_dir, "BIp.tif")) %>% crop(template) %>% mask(template)

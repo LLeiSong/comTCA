@@ -17,7 +17,6 @@
 ## sorghum: 1.3 tons/ha
 ## cassava: 8.4 tons/ha
 ## beans: 0.9 tons/ha
-## planted area weight: 6, 2, 1, 1, 1 based on 2020 survey
 ## attainable yield
 ## https://www.fao.org/global-perspectives-studies/food-agriculture-projections-to-2050/en/
 ## --------------------------------------------
@@ -28,6 +27,7 @@ library(sf)
 library(dplyr)
 library(readxl)
 library(stringr)
+library(tidyverse)
 
 # Set directories
 data_dir <- "data/agriculture"
@@ -83,6 +83,43 @@ command <- sprintf(
 system(command)
 farmland <- rast(file.path(data_dir, "cropland_tz_1km.tif"))
 
+# Pre-calibrate for non-NA regions to get the average best match quantiles
+# to fill the NAs
+quantile_avg <- do.call(c, lapply(names_cov$name, function(crp){
+    message(sprintf("Calibdate crop %s", crp))
+    # Only use rainfed
+    yields_crp <- yields[[crp]]
+    
+    ## Get the best match quantile value with surveys.
+    best_quantiles <- lapply(unique(regions$Region), function(rg){
+        ply <- regions %>% filter(Region == rg)
+        yield_rg <- crop(yields_crp, ply) %>% mask(ply)
+        farmland_rg <- crop(farmland, ply) %>% mask(ply)
+        
+        # Step 2: get real yield
+        real_yield <- nsca_yield %>% filter(Region == rg) %>% 
+            filter(Season == "both") %>% 
+            filter(Crop == crp) %>% pull(Yield)
+        
+        if (is.na(real_yield)){
+            # get the median if no real yield report
+            best_quantile <- NA
+        } else {
+            # Get the best match quantile
+            yield_rg_msk <- mask(yield_rg, farmland_rg)
+            best_quantile <- global(yield_rg_msk, mean, na.rm = TRUE) %>% 
+                data.frame() %>% rename(yield = mean) %>% 
+                mutate(quantile = row.names(.)) %>% 
+                mutate(residual = abs(yield - real_yield)) %>% 
+                filter(residual == min(residual)) %>% slice(1) %>% pull(quantile)
+        }
+    })
+    
+    quantiles <- str_extract(unlist(best_quantiles), "0.[0-9]+")
+    mean(as.numeric(quantiles), na.rm = TRUE)
+}))
+names(quantile_avg) <- names_cov$name
+
 # Calibrate yield
 yields_calib <- do.call(c, lapply(names_cov$name, function(crp){
     message(sprintf("Calibdate crop %s", crp))
@@ -101,8 +138,9 @@ yields_calib <- do.call(c, lapply(names_cov$name, function(crp){
             filter(Crop == crp) %>% pull(Yield)
         
         if (is.na(real_yield)){
-            # get the median if no real yield report
-            best_quantile <- 'prediction.quantile..0.5'
+            # get the average best match quantile if no real yield report
+            best_quantile <- round(quantile_avg[crp], 2)
+            best_quantile <- sprintf('prediction.quantile..%s', best_quantile)
         } else {
             # Get the best match quantile
             yield_rg_msk <- mask(yield_rg, farmland_rg)
@@ -121,20 +159,37 @@ names(yields_calib) <- names_cov$name
 
 # Check the statistics
 global(mask(yields_calib, crop(farmland, yields_calib)), mean, na.rm = TRUE)
+# The result show they match well
 
 # Save out
 fname <- file.path(data_dir, "yield_calibrated_5crops_tz_1km.tif")
 writeRaster(yields_calib, fname)
 
-# Use 95% quantile as the attainable yield
-fao_yield_pred <- data.frame(
-    Crop = names_cov$name,
-    Current_yield = c(1.39, 2.33, 1.2, 6.38, 1),
-    Predicted_yield = c(1.82, 3.3, 1.66, 8.52, 1.55))
-
+# Attainable yield
 # the survey yields and FAO simulated yields are very similar except cassava.
-# so we calibrate the cassava yield by multiplying a factor
-fao_yield_pred[4, 3] <- fao_yield_pred[4, 3] * (8.4 / fao_yield_pred[4, 2])
+# fao_yield_pred <- data.frame(
+#     Crop = names_cov$name,
+#     Current_yield = c(1.39, 2.33, 1.2, 6.38, 1),
+#     Predicted_yield = c(1.82, 3.3, 1.66, 8.52, 1.55))
+# fao_yield_pred[4, 3] <- fao_yield_pred[4, 3] * (8.4 / fao_yield_pred[4, 2])
+# Use towards sustainability scenario (this is the scenario with guess not too optimistic or pessimistic)
+fnames <- list.files(file.path(data_dir, "FAO"), full.names = TRUE)
+fao_yield_pred <- do.call(rbind, lapply(fnames, read.csv)) %>% 
+    filter(Year %in% c(2020, 2050)) %>% 
+    filter(ScenarioName == "Towards Sustainability") %>% 
+    select(ItemName, Year, V1) %>% 
+    pivot_wider(values_from = V1, names_from = Year) %>% 
+    rename(Crop = ItemName, Current_yield = `2020`, Predicted_yield = `2050`)
+fao_yield_pred$Crop <- c("cassava", "maize", "beans", "paddy", "sorghum")
+
+# To best match them, we calibrate the 2050 yield by multiplying a factor calculated
+# from 2020. This may not be perfect, but no projection of future yield can say
+# they are perfect.
+calib_values <- data.frame(
+    Crop = crops, Observed_current_yield = c(1.5, 2.3, 1.3, 8.4, 0.9))
+fao_yield_pred <- left_join(fao_yield_pred, calib_values, by = "Crop") %>% 
+    mutate(Predicted_yield = Predicted_yield / 
+               Current_yield * Observed_current_yield)
 
 yields_calib_qts <- do.call(rbind, lapply(names_cov$name, function(crp){
     message(sprintf("Calibdate crop %s", crp))
@@ -153,8 +208,9 @@ yields_calib_qts <- do.call(rbind, lapply(names_cov$name, function(crp){
             filter(Crop == crp) %>% pull(Yield)
         
         if (is.na(real_yield)){
-            # get the median if no real yield report
-            best_quantile <- 'prediction.quantile..0.5'
+            # get the average best match quantile if no real yield report
+            best_quantile <- round(quantile_avg[crp], 2)
+            best_quantile <- sprintf('prediction.quantile..%s', best_quantile)
         } else {
             # Get the best match quantile
             yield_rg_msk <- mask(yield_rg, farmland_rg)
@@ -185,7 +241,7 @@ yields_atn <- do.call(c, lapply(names_cov$name, function(crp){
     
     # Start from 0.6 quantile and add 0.05 each time for all districts to find
     # the best match add-on
-    best_addon <- do.call(rbind, lapply(0.05 * 1:7, function(addon){
+    best_addon <- do.call(rbind, lapply(0.01 * 1:45, function(addon){
         lyr <- do.call(merge, lapply(unique(regions$Region), function(rg){
             ply <- regions %>% filter(Region == rg)
             yield_rg <- crop(yields_crp, ply) %>% mask(ply)
@@ -224,7 +280,8 @@ yields_atn <- do.call(c, lapply(names_cov$name, function(crp){
 names(yields_atn) <- names_cov$name
 
 # Check the statistics
-global(yields_atn, mean, na.rm = TRUE)
+global(mask(yields_atn, crop(farmland, yields_atn)), mean, na.rm = TRUE)
+# The result show they match well
 
 # Save out
 fname <- file.path(data_dir, "yield_attainable_5crops_tz_1km.tif")
@@ -249,7 +306,8 @@ yield_compare <- do.call(rbind, lapply(unique(regions$Region), function(rg){
         data.frame() %>% mutate(Crop = row.names(.)) %>% 
         rename(Calibrated_Yield = mean) %>% mutate(Region = rg) %>% 
         inner_join(real_yield, by = c('Region', 'Crop'))
-})) %>% mutate(Crop = factor(Crop, levels = crops, labels = LETTERS[1:length(crops)]))
+})) %>% mutate(Crop = factor(Crop, levels = crops, labels = LETTERS[1:length(crops)])) %>% 
+    filter(!is.na(Yield))
 
 # Plot
 ggplot(yield_compare, aes(x = Yield, y = Calibrated_Yield)) + 
@@ -265,4 +323,4 @@ ggplot(yield_compare, aes(x = Yield, y = Calibrated_Yield)) +
     theme(text = element_text(size = 12),
           strip.text.x = element_text(
               size = 12, face = "bold"))
-ggsave("figures/S2_eval_yield_calibrate.png", width = 8, height = 6, bg = "white")
+ggsave("figures/S3_eval_yield_calibrate.png", width = 8, height = 6, bg = "white")

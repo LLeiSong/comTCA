@@ -1,6 +1,7 @@
 ## --------------------------------------------
-## Script name: prod_gain_from_ints
-## Purpose of script: production gain from existing cropland.
+## Script name: prod_potential_farmable_land
+## Purpose of script: production potential from farmable area. 
+## Almost the same as prod_gain_from_ints
 ## Author: Lei Song
 ## Date Created: 2023-10-22
 ##
@@ -22,11 +23,11 @@ library(pbmcapply)
 
 # Set directories
 tdf_dir <- "data/tradeoff"
-dst_dir <- "results/intensification"
+dst_dir <- "results/expansion"
 if(!dir.exists(dst_dir)) dir.create(dst_dir)
 
 # Define the function
-land_intes <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
+land_potential <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
     # yield: one in [100, 110, 120, 130, 140, 150]
     # cassava: one in [1, 2, 3, 4]
     # land_usage: percentage equal or higher than 0.653
@@ -36,47 +37,36 @@ land_intes <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
     
     # Get specific cell sizes, the same for all layers
     cellsizes <- cellSize(pas) / 1e6 * 100
-    cropland <- file.path(tdf_dir, "cropland_perc.tif") %>% 
+    farmable_area <- file.path(tdf_dir, "farmable_perc.tif") %>% 
         rast() %>% mask(pas) * cellsizes
+    farmable_area[farmable_area <= 0] <- NA
     # Only these units will be evaluated
     
     # Gather all inputs and standardize them
     yields <- rast(file.path(tdf_dir, "agro_current_yield.tif")) %>% 
-        mask(cropland)
+        mask(farmable_area)
     
     # Get the production increase from land expansion for each pixel
     # intes_gain = (atn_yield - current_yield) * current_land
     if (yield == 100){
         atn_yields <- rast(file.path(tdf_dir, "agro_attainable_yield.tif")) %>% 
-            mask(cropland)
+            mask(farmable_area)
     } else {
         atn_yields <- rast(
             file.path(tdf_dir, sprintf("agro_attainable_yield_%s.tif", yield))) %>% 
-            mask(cropland)
+            mask(farmable_area)
     }
     
     # Start the simulations---------------------------------------------------
     ## production gain from agricultural intensification ---------------------
     ## weight of planting area for maize, rice, sorghum, cassava and beans are
-    ## 6, 2, 1, 1, 1 (11 in total)
-    vals_current <- values(c(cropland, yields)) %>% na.omit() %>% data.frame()
-    vals_atn <- values(c(cropland, atn_yields)) %>% na.omit() %>% data.frame()
+    vals_atn <- values(c(farmable_area, atn_yields)) %>% na.omit() %>% data.frame()
     
     # Convert to planted area to harvested area
     cnt_ratio <- c(0.88, 0.88, 0.87, 0.33, 0.86)
     names(cnt_ratio) <- c("maize", "rice", "sorghum", "cassava", "beans")
     
     # Make the crops before the run
-    ## Current crops, area * 0.653 * 0.73
-    ## 0.653: planted_area_survey(non_tree_crops) / area_cropland (11765077/18389898) adjust 0.64 to 0.653
-    ## 0.72: planted_area_survey(5 crops) / planted_area_survey(non_tree_crops) (8458379 / 11765077)
-    ## The reason to adjust them to match with current production.
-    current_area <- ceiling(nrow(vals_current) * 0.653 * 0.72)
-    nums <- floor(current_area * c(58, 20, 6, 6, 10) / 100)
-    nums[5] <- nums[5] + (current_area - sum(nums))
-    crops_current <- c(rep(1, nums[1]), rep(2, nums[2]), rep(3, nums[3]), 
-                       rep(4, nums[4]), rep(5, nums[5]))
-    
     ## Attainable crops, area * 0.72 with different percentage of usage
     atn_area <- ceiling(nrow(vals_atn) * land_usage * 0.72)
     
@@ -99,18 +89,6 @@ land_intes <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
     
     # Do the calculation
     prod_gain_from_intense <- do.call(rbind, pbmclapply(1:100, function(n){
-        # Current yield
-        set.seed(n)
-        simu_plant_current <- vals_current %>% 
-            sample_n(size = current_area) %>% 
-            mutate(crop = sample(crops_current) + 1) %>% 
-            mutate(cnt_ratio = cnt_ratio[crop - 1])
-        
-        simu_prod_current <- lapply(1:nrow(simu_plant_current), function(i){
-            simu_plant_current[i, 1] * simu_plant_current[i, simu_plant_current[i, 7]] * 
-                simu_plant_current[i, 8]
-        }) %>% unlist() %>% sum()
-        
         # attainable yield
         set.seed(123 + n)
         simu_plant_atn <- vals_atn %>% 
@@ -123,9 +101,7 @@ land_intes <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
                 simu_plant_atn[i, 8]
         }) %>% unlist() %>% sum()
         
-        data.frame(Current_production = simu_prod_current,
-                   Attainable_production = simu_prod_atn,
-                   Production_gain = simu_prod_atn - simu_prod_current)
+        data.frame(Attainable_production = simu_prod_atn)
     }, mc.cores = 12, ignore.interactive = TRUE))
     fname <- file.path(
         dst_dir, sprintf("prod_gain_CASS%s_Y%s_USG%s.csv", 
@@ -136,12 +112,12 @@ land_intes <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
 
 # Yields with full land
 for (land_usage in c(0.653, 0.8, 1.0)){
-    for (yield in seq(100, 150, 10)){
-        land_intes(tdf_dir, dst_dir, yield, 1, land_usage)
+    for (yield in seq(100, 140, 10)){
+        land_potential(tdf_dir, dst_dir, yield, 1, land_usage)
     }
     
     # Cassava with same 
     for (cassava in 2:5){
-        land_intes(tdf_dir, dst_dir, 100, cassava, land_usage)
+        land_potential(tdf_dir, dst_dir, 100, cassava, land_usage)
     }
 }

@@ -668,7 +668,7 @@ pas <- pas %>%
 practices <- str_extract(fnames, "Y100|CASS3|Y140")
 usages <- str_extract(fnames, "USG65|USG80")
 crop_cols <- c(
-    "#BF812D", "#543005",  "#a1d99b", "#31a354", "#fdae6b", 
+    "#BF812D", "#543005",  "#e9a3c9", "#c51b7d", "#fdae6b", 
     "#e6550d", "#9ecae1", "#3182bd",  "#bcbddc", "#756bb1")
 
 fig_list <- lapply(c("Y100", "CASS3", "Y140"), function(practice){
@@ -690,6 +690,31 @@ fig_list <- lapply(c("Y100", "CASS3", "Y140"), function(practice){
                      "Cassava", "Common beans"), 
                    function(x) sprintf("%s_%s", x, c("65", "80")))))
     
+    # Get sub_map
+    sub_ply <- ext(c(xmin = 33.4, xmax = 34.2, 
+                     ymin = -3.2, ymax = -2.4)) %>% 
+        vect(crs = "EPSG:4326") %>% st_as_sf(crs = 4326) %>% 
+        st_centroid() %>% st_buffer(0.4)
+    sub_map <- crop(map, sub_ply) %>% mask(sub_ply)
+    cols_sub <- crop_cols[freq(sub_map)[["value"]] %in% freq(map)[["value"]]]
+    zoomin <- ggplotGrob(
+        ggplot() +
+            geom_spatraster(data = sub_map, na.rm = TRUE) +
+            scale_fill_manual(
+                values = cols_sub,
+                na.translate = FALSE) +
+            geom_sf(data = sub_ply, color = "black", 
+                fill = "transparent", linewidth = 0.6) +
+            coord_sf() + theme_void() +
+            theme(text = element_text(size = 10),
+                  legend.text = element_text(size = 10),
+                  legend.spacing.y = unit(0.1, 'cm'),
+                  legend.margin = margin(rep(0, 4)),
+                  legend.key.height = unit(0.4, 'cm'),
+                  legend.key.width = unit(0.8, 'cm'),
+                  plot.margin = unit(c(0, -1, 0, -1), "cm"),
+                  legend.position = "none"))
+
     # Figure
     ggplot() +
         geom_spatraster(data = map, na.rm = TRUE) +
@@ -700,9 +725,11 @@ fig_list <- lapply(c("Y100", "CASS3", "Y140"), function(practice){
                 fill = "#f0f0f0", linewidth = 0) +
         geom_sf(data = bry, color = "black", 
                 fill = "transparent", linewidth = 0.6) +
-        annotation_custom(grob = zoomin, 
-                      xmin = 30, xmax = 32,
-                      ymin = - 12, ymax = - 10) +
+        geom_sf(data = sub_ply, color = "black", 
+                fill = "transparent", linewidth = 0.4) +
+        annotation_custom(grob = zoomin,
+                      xmin = 29.9, xmax = 33.1,
+                      ymin = - 12.1, ymax = - 8.9) +
         coord_sf() + theme_void() +
         theme(text = element_text(size = 10),
           legend.text = element_text(size = 10),
@@ -716,25 +743,32 @@ fig_list <- lapply(c("Y100", "CASS3", "Y140"), function(practice){
 
 # Make legend
 dat <- data.frame(
-    rst = c("Maize", "Paddy rice", "Sorghum", 
-            "Cassava", "Common beans"), 
-    x = 1:5, y = 1:5) %>% 
-    mutate(rst = factor(rst, levels = c("Maize", "Paddy rice", "Sorghum", 
-            "Cassava", "Common beans"),
-            labels = c("Maize", "Paddy rice", "Sorghum", 
-            "Cassava", "Common beans")))
-dat2 <- data.frame(x = 1:2, y = 1:2, z = c("80", "65")) %>% 
+    rst = c("Maize", "Maize2", "Paddy rice", "Paddy rice2", 
+            "Sorghum", "Sorghum2", "Cassava", "Cassava2", 
+            "Common beans", "Common beans2"), 
+    x = 1:10, y = 1:10) %>% 
+    mutate(rst = factor(
+        rst, levels = c("Maize", "Maize2", "Paddy rice", "Paddy rice2", 
+                        "Sorghum", "Sorghum2", "Cassava", "Cassava2", 
+                        "Common beans", "Common beans2"),
+        labels = c("Maize", "Maize2", "Paddy rice", "Paddy rice2", 
+                   "Sorghum", "Sorghum2", "Cassava", "Cassava2", 
+                   "Common beans", "Common beans2")))
+dat2 <- data.frame(x = 1:2, y = 1:2, z = c("65", "80")) %>% 
     mutate(z = factor(z, levels = c("65", "80"), labels = c("65", "80")))
 legend <-  ggplot() + 
     geom_raster(data = dat,  aes(x = x, y = y, fill = rst)) +
     scale_fill_manual('Suggested crop',
-                      values = crop_cols[c(2, 4, 6, 8 ,10)],
+                      values = crop_cols,
+                      labels = c("Maize", "", "Paddy rice", "", "Sorghum", "", 
+                                 "Cassava", "", "Common beans", ""),
                       guide = guide_legend(title.position = "top", 
                                            title.hjust = 0.5)) +
     new_scale_fill() +
     geom_raster(data = dat2, aes(x = x, y = y, fill = z)) +
     scale_fill_manual('Land usage (%)',
-                      values = c("Black", "grey"), labels = c("80", "65"))+
+                      values = c("grey", "Black"), labels = c("65", "80"),
+                      )+
     theme(legend.text = element_text(size = 10),
           legend.position = "top", legend.direction = "horizontal")+
     guides(fill = guide_legend(title.position = "top", title.hjust = 0.5))
@@ -742,7 +776,7 @@ legend_lc <- get_legend(legend)
 
 g1 <- ggarrange(legend_lc, ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
           labels = c("A", "B", "C")), 
-          nrow = 2, ncol = 1, heights = c(2, 10))
+          nrow = 2, ncol = 1, heights = c(3, 10))
 
 # New area and ecological costs change
 vals_65 <- read.csv(
@@ -778,13 +812,15 @@ vals <- vals %>% group_by(Element) %>%
     mutate(Element = factor(Element, levels = c("Y", "B", "Ca", "Co", "D"),
                             labels = c("New cropland", "Biodiveristy loss", "Carbon loss",
                                        "Connectivity loss", "Cost distance increase")))
+vals <- vals %>% mutate(group = ifelse(USG == 65 & Practice == "A", "B", "P"))
 
 g2 <- ggplot(data = vals) + 
     geom_linerange(aes(
-        x = Practice, ymin = 0, ymax = value, linetype = USG), 
+        x = Practice, ymin = 0, ymax = value, linetype = USG, color = group), 
         linewidth = 0.6, position = position_dodge2(width = 0.5)) +
-    geom_point(aes(x = Practice, y = value), size = 1,
+    geom_point(aes(x = Practice, y = value, color = group), size = 1,
                position = position_dodge2(width = 0.5)) +
+    scale_color_manual(values = c("#d73027", "black")) +
     xlab("") + ylab("Percentage") + labs(linetype = "Land usage (%)") +
     facet_grid(~Element) +
     theme_light() +
@@ -798,13 +834,14 @@ g2 <- ggplot(data = vals) +
           legend.text = element_text(size = 10, color = "black"),
           legend.title = element_text(size = 10, color = "black"),
           legend.position = "top",
-          plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm"))
+          plot.margin = unit(c(0.1, 0.1, 0.1, 0.1), "cm")) +
+    guides(color = "none")
 
 ggarrange(g1, g2, nrow = 2, ncol = 1, heights = c(6, 5))
 
 ggsave("figures/figure7_compare.png",
        bg = "white",
-       width = 7.4, height = 5.5, dpi = 500)
+       width = 7.4, height = 5.6, dpi = 500)
 ```
 
 ## Agricultural yield

@@ -392,7 +392,7 @@ g2 <- ggplot(vals, aes(x = from, y = to, fill = agreement)) +
     geom_text(aes(from, to, label = round(agreement, 0)), 
                   color = "white", size = 3) +
     scale_fill_continuous_sequential(limits = c(0, 80),
-        name = "Overlap (%)", palette = "Plasma") +
+        name = expression("IoU (" %*% "100)"), palette = "Plasma") +
     theme_minimal() +
     theme(axis.title.x = element_blank(),
           axis.title.y = element_blank(),
@@ -474,7 +474,7 @@ fig_list <- lapply(c("Maize", "Paddy", "Sorghum", "Cassava", "Beans"),
         geom_text(aes(from, to, label = round(agreement, 0)), 
                   color = "white", size = 3) +
         scale_fill_continuous_sequential(limits = c(0, 80),
-            name = "Overlap (%)", palette = "Plasma") +
+            name = expression("IoU (" %*% "100)"), palette = "Plasma") +
         theme_minimal() +
         theme(axis.title.x = element_blank(),
               axis.title.y = element_blank(),
@@ -529,7 +529,7 @@ g1 <- ggplot(data = vals %>% filter(yield == 100),
                      y = 12002439/1e7, label = "Double the current production") +
     scale_color_npg(name = "Land usage (%)") + 
     geom_errorbar(aes(ymin = (mean - sd)/1e7, ymax = (mean + sd)/1e7), width=.1) +
-    xlab("Increase (fold) in planted area of cassava") +
+    xlab("Increase in cassava planted area (#fold)") +
     ylab(expression(paste("Production growth (", 10^7, "tons)"))) +
     theme_classic()+
     theme(text = element_text(size = 10),
@@ -550,7 +550,7 @@ g2 <- ggplot(data = vals %>% filter(cassava == 1) %>% filter(yield < 150),
                      y = 12002439/1e7, label = "Double the current production") +
     scale_color_npg(name = "Land usage (%)") +
     geom_errorbar(aes(ymin = (mean - sd)/1e7, ymax = (mean + sd)/1e7), width=.1) +
-    xlab("Increase (%) in yield gap close") +
+    xlab("Increase in attainable yield (%)") +
     ylab(expression(paste("Production growth (", 10^7, "tons)"))) +
     theme_classic()+
     theme(text = element_text(size = 10),
@@ -573,66 +573,6 @@ ggsave("figures/figure5_prod_growth.png",
 ```
 
 ### Figure 6
-
-```{r}
-fnames <- list.files("results/expansion", full.names = TRUE)
-vals <- do.call(rbind, lapply(fnames, function(fname){
-    params <- as.numeric(str_extract_all(fname, "[0-9]+")[[1]])
-    vals <- read.csv(fname) %>% pull(Attainable_production)
-    data.frame(cassava = params[1], yield = params[2], 
-               land_usage = params[3], mean = mean(vals),
-               sd = sd(vals))
-}))
-
-# Figure
-# geom_bar(stat="identity", position=position_dodge()) + 
-# Figure for cassava increase
-g1 <- ggplot(data = vals %>% filter(yield == 100),
-       aes(y = mean/1e7, x=cassava, color = factor(land_usage))) +
-    geom_point() + geom_line() + ylim(min(vals$mean)/1e7, max(vals$mean)/1e7) +
-    scale_color_npg(name = "Land usage (%)") +
-    geom_errorbar(aes(ymin = (mean - sd)/1e7, ymax = (mean + sd)/1e7), width=.1) +
-    xlab("Increase (fold) in planted area of cassava") +
-    ylab(expression(paste("Production potential (", 10^7, "tons)"))) +
-    theme_classic()+
-    theme(text = element_text(size = 10),
-          legend.text = element_text(size = 10),
-          legend.title = element_text(size = 10),
-          legend.key.height = unit(0.4, 'cm'),
-          legend.key.width = unit(0.3, 'cm'),
-          legend.margin = margin(rep(0, 4)),
-          legend.box.margin = margin(rep(0.4, 4)),
-          legend.position = "top",
-          plot.margin = unit(rep(0.1, 4), "cm"))
-
-g2 <- ggplot(data = vals %>% filter(cassava == 1) %>% filter(yield < 150),
-       aes(y = mean/1e7, x=yield, color = factor(land_usage))) +
-    geom_point() + geom_line() + ylim(min(vals$mean)/1e7, max(vals$mean)/1e7) +
-    scale_color_npg(name = "Land usage (%)") +
-    geom_errorbar(aes(ymin = (mean - sd)/1e7, ymax = (mean + sd)/1e7), width=.1) +
-    xlab("Increase (%) in yield gap close") +
-    ylab(expression(paste("Production potential (", 10^7, "tons)"))) +
-    theme_classic()+
-    theme(text = element_text(size = 10),
-          legend.text = element_text(size = 10),
-          legend.title = element_text(size = 10),
-          legend.key.height = unit(0.4, 'cm'),
-          legend.key.width = unit(0.3, 'cm'),
-          legend.margin = margin(rep(0, 4)),
-          legend.box.margin = margin(rep(0.4, 4)),
-          legend.position = "top",
-          plot.margin = unit(rep(0.1, 4), "cm"))
-
-ggarrange(g1, g2, nrow = 1, ncol = 2,
-          labels = c("A", "B"), legend = "top",
-          common.legend = TRUE)
-
-ggsave("figures/figure6_prod_potential.png",
-       bg = "white",
-       width = 6, height = 3, dpi = 500)
-```
-
-### Figure 7
 
 Compare the hybrid mode for different scenarios: baseline (Y100, CASS1), yield gap close further (Y140), and growing more high-yield crop (CASS3).
 
@@ -809,9 +749,10 @@ vals <- vals %>% group_by(Element) %>%
     mutate(USG = factor(USG, labels = c("65", "80"), levels = c(65, 80))) %>% 
     mutate(Practice = factor(Practice, labels = c("A", "B", "C"),
                              levels = c("Y100", "CASS3", "Y140"))) %>% 
-    mutate(Element = factor(Element, levels = c("Y", "B", "Ca", "Co", "D"),
-                            labels = c("New cropland", "Biodiveristy loss", "Carbon loss",
-                                       "Connectivity loss", "Cost distance increase")))
+    mutate(Element = factor(
+        Element, levels = c("Y", "B", "Ca", "Co", "D"),
+        labels = c("New cropland area", "Biodiveristy loss", "Carbon loss",
+                   "Connectivity loss", "Cost distance increase")))
 vals <- vals %>% mutate(group = ifelse(USG == 65 & Practice == "A", "B", "P"))
 
 g2 <- ggplot(data = vals) + 
@@ -842,6 +783,75 @@ ggarrange(g1, g2, nrow = 2, ncol = 1, heights = c(6, 5))
 ggsave("figures/figure7_compare.png",
        bg = "white",
        width = 7.4, height = 5.6, dpi = 500)
+```
+
+### Figure 7
+
+```{r}
+fnames <- list.files("results/intensification", full.names = TRUE)
+vals <- do.call(rbind, lapply(fnames, function(fname){
+    params <- as.numeric(str_extract_all(fname, "[0-9]+")[[1]])
+    vals <- read.csv(fname) %>% pull(Production_gain)
+    data.frame(cassava = params[1], yield = params[2], 
+               land_usage = params[3], mean = mean(vals),
+               sd = sd(vals))
+}))
+
+
+fnames <- list.files("results/expansion", full.names = TRUE)
+vals_future <- do.call(rbind, lapply(fnames, function(fname){
+    params <- as.numeric(str_extract_all(fname, "[0-9]+")[[1]])
+    vals <- read.csv(fname) %>% pull(Attainable_production)
+    data.frame(cassava = params[1], yield = params[2], 
+               land_usage = params[3], mean = mean(vals),
+               sd = sd(vals))
+}))
+
+vals <- left_join(vals, vals_future, by = c("cassava", "yield", "land_usage")) %>% 
+    mutate(sum = mean.x + mean.y) %>% 
+    select(cassava, yield, land_usage, sum) %>% 
+    filter(yield != 150) %>% 
+    mutate(sum = (sum / 12572439) + 1) %>% 
+    mutate(cassava = factor(cassava),
+           land_usage = factor(land_usage),
+           yield = factor(yield))
+
+
+ggplot() + geom_point(data = vals %>% filter(yield == 100),
+                    aes(x = land_usage, y = sum, fill = cassava),
+                    shape = 21, size = 1.6) +
+    scale_fill_brewer("Increased planted area \nof cassava (times)", 
+        palette="RdPu",
+        guide = guide_legend(title.position="top", title.hjust = 0.5)) +
+    new_scale_fill() +
+    geom_point(data = vals %>% filter(cassava == 1),
+             aes(x = land_usage, y = sum, fill = yield), 
+             shape = 23, size = 1.6,
+             position = position_nudge(x = 0.2)) +
+    scale_fill_brewer("Increased attainable yield (%)",
+        palette="PuBu",
+        guide = guide_legend(title.position="top", title.hjust = 0.5)) +
+    xlab("Land usage (%)") + ylab("Multiples of current crop production") +
+    theme_classic() +
+    theme(panel.grid.major.y = element_line(
+        color = "lightgrey", linetype = "dashed"),
+          panel.border = element_blank(),
+          axis.title = element_text(size = 10, color = "black"),
+          axis.text = element_text(size = 10, color = "black"),
+          text = element_text(size = 10),
+          legend.text = element_text(size = 10),
+          legend.title = element_text(size = 10),
+          legend.margin = margin(rep(0, 4)),
+          legend.spacing.y = unit(0, 'cm'),
+          legend.box.margin = margin(rep(0, 4)),
+          legend.position = "top",
+          legend.box.just = "center",
+          legend.box="vertical",
+          plot.margin = unit(rep(0, 4), "cm"))
+
+ggsave("figures/figure6_prod_potential.png",
+       bg = "white",
+       width = 3, height = 5, dpi = 500)
 ```
 
 ## Agricultural yield

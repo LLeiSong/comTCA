@@ -32,4 +32,24 @@ Note: the range sizes calculated from step 8 are all in pixels. Step 9 convert p
 ## Crop yield and gaps
 
 1. Run `11_downscale_yield.R` to use quantile regression forest to downscale SPAM 2017 yield maps of 10 km to 1 km.
-2. Run `11_calibrate_yield.R` to calibrate the down-scaled yield to match with district surveys and then use predicted 95% quantile as the attainable yield.
+2. Run `11_calibrate_yield.R` to calibrate the down-scaled yield to match with district surveys for current yields and then to match with FAO projections for attainable yields.
+
+## Spatial tradeoff modeling for new cropland allocation
+
+1. Run `12_1_prepare_inputs.R` to pick relevant layers from different directories and save to one path for convenience.
+2. Run `12_2_prod_gain_from_ints.R` to first get the production growth on existing cropland, which will determine the needed area of extra cropland.
+3. Run `12_3_prod_potential_farmable_land.R` (Optional) to get the production potential for all existing and farmable area.
+4. Run `12_4_future_land_allocation.R` and various setting parameters to allocate land for future agriculture.
+5. Run `12_5_gather_results.R` to collect and summarize the simulation results.
+
+Note: Some scripts are designed to take command line inputs to conveniently submit to HPC for parallel computation. The slurm schedulers can be found in folder `~schedulers`. 
+
+## Analysis
+
+After all these steps, the users should get the results based on how they set. The tables/maps should locate in `~/results` with structure like:
+
+- expansion (optional)
+- intensification
+- other folder named by you for simulations
+
+The document to make figures for our study locates in `~docs` as `figures_in_manuscript.qmd`.

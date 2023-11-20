@@ -14,8 +14,15 @@ library(dplyr)
 library(terra)
 
 ## Compare different scenarios
-data_dir <- "results/USG80" # results/scenarios
+data_dir <- "results/scenarios"
+usage <- 65
+land_usage <- 0.653
+
+# USG80
+data_dir <- "results/USG80"
 usage <- 80
+land_usage <- 0.8
+
 dst_dir <- file.path(data_dir, "summary")
 if(!dir.exists(dst_dir)) dir.create(dst_dir)
 f_dir <- file.path(data_dir, "numbers")
@@ -44,7 +51,8 @@ smry_all_exps <- do.call(rbind, lapply(scenarios, function(item){
                            Carbon = sum(dt$Carbon),
                            Connectivity = sum(dt$Connectivity),
                            Distance = sum(dt$Distance),
-                           farmable_area = sum(dt$farmable_ratio))
+                           farmable_area = sum(dt$farmable_ratio),
+                           num_unit = nrow(dt))
             }, mc.cores = 10))
             
             simu_list %>% summarise(across(everything(), c(mean, sd))) %>% 
@@ -62,6 +70,8 @@ names(smry_all_exps) <- nms
 fname <- file.path(dst_dir, sprintf("summary_scenarios_USG%s_mean_sd.csv", usage))
 write.csv(smry_all_exps, fname, row.names = FALSE)
 
+cnt_ratio <- c(0.88, 0.88, 0.87, 0.33, 0.86)
+names(cnt_ratio) <- c("maize", "paddy", "sorghum", "cassava", "beans")
 ## Record everything
 for (item in scenarios) {
     for(change in changes){
@@ -77,6 +87,8 @@ for (item in scenarios) {
                 dt$Carbon <- dt$Carbon * dt$farmable_ratio
                 dt$Connectivity <- dt$Connectivity * dt$farmable_ratio
                 dt$Distance <- dt$Distance * dt$farmable_ratio
+                dt$Production_gain <- dt$Production_gain * 
+                    land_usage * cnt_ratio[dt$crop]
                 
                 # accumulate them
                 dt$Production_gain <- cumsum(dt$Production_gain)
@@ -87,7 +99,8 @@ for (item in scenarios) {
                 dt$farmable_ratio <- cumsum(dt$farmable_ratio)
                 
                 dt %>% select('Production_gain', 'Biodiversity', 'Carbon',
-                              'Connectivity',  'Distance', 'farmable_ratio', 'id')
+                              'Connectivity',  'Distance', 'farmable_ratio', 
+                              'id')
             }, mc.cores = 10))
             
             simu_mean <- simu_list %>% group_by(id) %>% 

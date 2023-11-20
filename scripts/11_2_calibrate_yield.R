@@ -323,4 +323,4 @@ ggplot(yield_compare, aes(x = Yield, y = Calibrated_Yield)) +
     theme(text = element_text(size = 12),
           strip.text.x = element_text(
               size = 12, face = "bold"))
-ggsave("figures/S2_eval_yield_calibrate.png", width = 8, height = 6, bg = "white")
+ggsave("figures/S3_eval_yield_calibrate.png", width = 8, height = 6, bg = "white")

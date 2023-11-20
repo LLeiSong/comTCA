@@ -176,4 +176,4 @@ ggarrange(
     plotlist = fig_list,
     labels = c("A", "B", "C", "D", "E"),
     ncol = 3, nrow = 2, common.legend = TRUE, legend = "bottom")
-ggsave("figures/S1_eval_yield_downscale.png", width = 8, height = 6, bg = "white")
+ggsave("figures/S2_eval_yield_downscale.png", width = 8, height = 6, bg = "white")

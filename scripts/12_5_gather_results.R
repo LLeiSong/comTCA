@@ -31,6 +31,10 @@ scenarios <- unique(sapply(strsplit(basename(fnames), "_"), function(x) x[1]))
 changes <- unique(sapply(strsplit(basename(fnames), "_"), function(x) x[2]))
 
 ## Overall
+## The conversion ratio
+cnt_ratio <- c(0.88, 0.88, 0.87, 0.33, 0.86)
+names(cnt_ratio) <- c("maize", "paddy", "sorghum", "cassava", "beans")
+
 smry_all_exps <- do.call(rbind, lapply(scenarios, function(item){
     do.call(rbind, lapply(changes, function(change){
         message("Start: ", item, " ", change)
@@ -40,11 +44,14 @@ smry_all_exps <- do.call(rbind, lapply(scenarios, function(item){
         if (length(fnames) != 0){
             simu_list <- do.call(rbind, mclapply(fnames, function(fname){
                 dt <- read.csv(fname)
+                dt <- dt %>% mutate(crop_ratio = cnt_ratio[crop])
+                
                 # Calculate volume to use weight
                 dt$Biodiversity <- dt$Biodiversity * dt$farmable_ratio
                 dt$Carbon <- dt$Carbon * dt$farmable_ratio
                 dt$Connectivity <- dt$Connectivity * dt$farmable_ratio
                 dt$Distance <- dt$Distance * dt$farmable_ratio
+                dt$farmable_area_cultv <- dt$farmable_ratio * land_usage * dt$crop_ratio
                 
                 # accumulate them
                 data.frame(Biodiversity = sum(dt$Biodiversity),
@@ -52,8 +59,9 @@ smry_all_exps <- do.call(rbind, lapply(scenarios, function(item){
                            Connectivity = sum(dt$Connectivity),
                            Distance = sum(dt$Distance),
                            farmable_area = sum(dt$farmable_ratio),
+                           farmable_area_cultv = sum(dt$farmable_area_cultv),
                            num_unit = nrow(dt))
-            }, mc.cores = 10))
+            }, mc.cores = detectCores() - 1))
             
             simu_list %>% summarise(across(everything(), c(mean, sd))) %>% 
                 mutate(land_usage = usage, scenario = item, change = change)
@@ -70,8 +78,6 @@ names(smry_all_exps) <- nms
 fname <- file.path(dst_dir, sprintf("summary_scenarios_USG%s_mean_sd.csv", usage))
 write.csv(smry_all_exps, fname, row.names = FALSE)
 
-cnt_ratio <- c(0.88, 0.88, 0.87, 0.33, 0.86)
-names(cnt_ratio) <- c("maize", "paddy", "sorghum", "cassava", "beans")
 ## Record everything
 for (item in scenarios) {
     for(change in changes){

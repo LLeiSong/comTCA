@@ -32,20 +32,20 @@ library(optparse)
 # Function to allocate the land for agriculture
 land_allocate <- function(
         # Inputs
-        atn_yields, # the attainable yield to calculate production gain
-        farmable_area, # all new farmable area
-        weights, # weight for other factors except yields
-        costs, # the cost by expansion
-        # Scenario setting
-        name = "Y", # the name for the experiment.
-        cbetas, # the prefer factor for each weight, the first one is for yield
-        scenario = "Y100", # Y for increased yield gap close, and CASS for increase cassava plant area.
-        land_usage = 0.653, # the percentage of annual land use. 0.65, 0.8, or 1.0
-        production_need = 0, # production target (e.g. double)
-        # Common setting
-        spatial = TRUE,
-        seed = 123,
-        dst_dir){
+    atn_yields, # the attainable yield to calculate production gain
+    farmable_area, # all new farmable area
+    weights, # weight for other factors except yields
+    costs, # the cost by expansion
+    # Scenario setting
+    name = "Y", # the name for the experiment.
+    cbetas, # the prefer factor for each weight, the first one is for yield
+    scenario = "Y100", # Y for increased yield gap close, and CASS for increase cassava plant area.
+    land_usage = 0.653, # the percentage of annual land use. 0.653, 0.8, or 1.0
+    production_need = 0, # production target (e.g. double)
+    # Common setting
+    spatial = TRUE,
+    seed = 123,
+    dst_dir){
     # Create directories
     num_dir <- file.path(dst_dir, "numbers")
     if (!dir.exists(num_dir)) dir.create(num_dir)
@@ -185,32 +185,6 @@ cropland <- file.path(tdf_dir, "cropland_perc.tif") %>%
     rast() %>% mask(pas) * cellsizes
 # Only these units will be evaluated
 
-# Gather all inputs and standardize them
-## Yield
-yields <- rast(file.path(tdf_dir, "agro_current_yield.tif")) %>% 
-    mask(farmable_area)
-
-## Ecological costs
-costs <- file.path(
-    tdf_dir, c("bio_index.tif", "carbon_density.tif", 
-               "conn_index.tif", "agro_travel_time.tif")) %>% 
-    rast() %>% mask(farmable_area)
-names(costs) <- c("Biodiversity", "Carbon", "Connectivity", "Distance")
-
-## Get efficiency-based weights for ecological costs
-weights <- lapply(costs, function(lyr){
-    lyrs <- 1 - stretch(lyr / yields, minv = 0, maxv = 1)
-    names(lyrs) <- names(yields)
-    lyrs
-})
-
-## Get yield weights
-yields_as_weights <- 1 - stretch(1 / yields, minv = 0, maxv = 1)
-
-## Put them together
-weights <- c(list(yields_as_weights), weights)
-names(weights) <- c("Yield", "Biodiversity", "Carbon", "Connectivity", "Distance")
-
 # Command line inputs
 option_list <- list(
     make_option(c("-s", "--seed"), 
@@ -227,7 +201,7 @@ option_list <- list(
                               "CASS2, CASS3, CASS4, CASS5].")),
     make_option(c("-l", "--land_usage"), 
                 action = "store", type = 'numeric',
-                help = "The percentage of land usage, [0.65, 0.8, 1.0]."))
+                help = "The percentage of land usage, [0.653, 0.8, 1.0]."))
 opt <- parse_args(OptionParser(option_list = option_list))
 seed <- opt$seed
 cbetas <- opt$cbetas
@@ -245,6 +219,28 @@ atn_yield_fname <- file.path(
                      ifelse(yield_num == 100, "", paste0("_", yield_num))))
 atn_yields <- rast(atn_yield_fname) %>% mask(farmable_area)
 message(sprintf("Read attainable layer: %s.", basename(atn_yield_fname)))
+
+# Gather all weight inputs and standardize them
+## Ecological costs
+costs <- file.path(
+    tdf_dir, c("bio_index.tif", "carbon_density.tif", 
+               "conn_index.tif", "agro_travel_time.tif")) %>% 
+    rast() %>% mask(farmable_area)
+names(costs) <- c("Biodiversity", "Carbon", "Connectivity", "Distance")
+
+## Get efficiency-based weights for ecological costs
+weights <- lapply(costs, function(lyr){
+    lyrs <- 1 - stretch(lyr / atn_yields, minv = 0, maxv = 1)
+    names(lyrs) <- names(atn_yields)
+    lyrs
+})
+
+## Get yield weights
+yields_as_weights <- 1 - stretch(1 / atn_yields, minv = 0, maxv = 1)
+
+## Put them together
+weights <- c(list(yields_as_weights), weights)
+names(weights) <- c("Yield", "Biodiversity", "Carbon", "Connectivity", "Distance")
 
 # Get the production increase on existing cropland
 fname <- file.path(

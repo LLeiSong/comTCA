@@ -161,9 +161,3 @@ cum_fname <- file.path(circ_dir, "cum_curmap.tif")
 mean_fname <- file.path(circ_dir, "mean_curmap.tif")
 writeRaster(cum_raster, cum_fname)
 writeRaster(mean_raster, mean_fname)
-
-# Normalize the mean cumulative current density
-mean_raster_norm <- stretch(mean_raster, minv = 0, maxv = 1, histeq = TRUE)
-writeRaster(
-    mean_raster_norm, overwrite = TRUE,
-    file.path(circ_dir, "mean_curmap_robust_norm.tif"))

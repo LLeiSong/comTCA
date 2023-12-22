@@ -3,7 +3,6 @@
 #             used for the final calculation.
 # Created by: Lei Song
 # Created on: 09/09/23
-# Usage: python scripts/calc_species_richness.py --txn birds
 
 library(sf)
 library(here)

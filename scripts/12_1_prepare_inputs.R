@@ -100,12 +100,6 @@ command <- sprintf(
     options_warp, "data/elevation/farmable_calibrated.tif", farmable_ratio)
 system(command)
 
-## Areas
-farmable <- rast(farmable_ratio) %>% crop(template)
-writeRaster(farmable, file.path(tradeoff_dir, "farmable_perc.tif"))
-cropland <- rast("data/landcover/cropland_ratio.tif") %>% crop(template)
-writeRaster(cropland, file.path(tradeoff_dir, "cropland_perc.tif"))
-
 # Protected areas
 pas <- read_sf(
     file.path("data/protected_area", "WDPA_WDOECM_Jan2023_Public_TZA",
@@ -119,18 +113,34 @@ pas <- rasterize(pas, template, values = 1, background = 0) %>% mask(template)
 writeRaster(pas, file.path(tradeoff_dir, "protected_areas.tif"), 
             datatype = "INT1U", gdal = c("COMPRESS=LZW"))
 
+# Make a mask of PA
+pas[pas == 1] <- NA
+
+# Farmable area
+# Get specific cell sizes in ha, the same for all layers
+cellsizes <- cellSize(pas) / 1e6 * 100
+farmable <- rast(farmable_ratio) %>% crop(template) %>% 
+    mask(pas) * cellsizes
+farmable[farmable < 0.9] <- NA # smallest smallholder farm size
+writeRaster(farmable, file.path(tradeoff_dir, "farmable_area.tif"))
+
+# Current cropland
+cropland <- rast("data/landcover/cropland_ratio.tif") %>% 
+    crop(template) %>% mask(template)
+writeRaster(cropland, file.path(tradeoff_dir, "cropland_perc.tif"))
+
 ## Prioritization and impact
 # agriculture
 current_yield <- file.path(agro_dir, "yield_calibrated_5crops_tz_1km.tif") %>% 
-    rast() %>% extend(., ext(template)) %>% crop(template)
+    rast() %>% extend(., ext(farmable)) %>% crop(farmable) %>% mask(farmable)
 writeRaster(current_yield, file.path(tradeoff_dir, "agro_current_yield.tif"))
 atn_yield <- file.path(agro_dir, "yield_attainable_5crops_tz_1km.tif") %>%
-    rast() %>% extend(., ext(template)) %>% crop(template)
+    rast() %>% extend(., ext(farmable)) %>% crop(farmable) %>% mask(farmable)
 writeRaster(atn_yield, file.path(tradeoff_dir, "agro_attainable_yield.tif"))
 travel_time <- rast(file.path(agro_dir, "travel_time.tif"))
 travel_time[travel_time== -9999] <- NA
-travel_time <- travel_time %>% resample(template) %>% 
-    mask(template) %>% crop(template)
+travel_time <- travel_time %>% resample(farmable) %>% 
+    mask(farmable) %>% crop(farmable)
 writeRaster(travel_time, file.path(tradeoff_dir, "agro_travel_time.tif"))
 
 ## 110%-150% yield gap close
@@ -140,18 +150,56 @@ for(fct in seq(1.1, 1.5, 0.1)){
     writeRaster(an_yield_ins, fname)
 }
 
-# biodiversity
-bio_index <- rast(file.path(bio_dir, "BIp.tif")) %>% crop(template) %>% mask(template)
-writeRaster(bio_index, file.path(tradeoff_dir, "bio_index.tif"))
+# biodiversity, calculate the proactive index on the fly
+# See details in script 8_3_calc_biodiversity_index.R
+# Read ecosystem-level index
+bhi_msa_bii <- rast(file.path(bio_dir, "bhi_msa_bii.tif")) %>% 
+    crop(farmable) %>% mask(farmable)
+
+# Calculate species component
+normalize <- function(x, robust = TRUE) {
+    if (robust) {
+        stretch(x, minv = 0, maxv = 1, minq = 0.01, maxq = 0.99)
+    } else {
+        (x - minmax(x)[1]) / (minmax(x)[2] - minmax(x)[1])
+    }
+}
+
+# richness
+fnames <- list.files(bio_dir, pattern = "*weighted*", full.names = TRUE)
+richness_fns <- fnames[!grepl("rarity", fnames)]
+
+richness <- do.call(
+    c, lapply(richness_fns, function(fn){
+        rast(fn) %>% resample(bhi_msa_bii) %>% 
+            crop(farmable) %>% mask(farmable) %>% normalize()
+    })) %>% mean() %>% normalize(FALSE)
+
+# endemism richness
+endemism_fns <- fnames[grepl("rarity", fnames)]
+# Use robust scaling to avoid the impacts of outliers
+endemism <- do.call(
+    c, lapply(endemism_fns, function(fn){
+        rast(fn) %>% resample(bhi_msa_bii) %>% 
+            crop(farmable) %>% mask(farmable) %>% normalize()
+    })) %>% mean() %>% normalize(FALSE)
+
+# proactive index
+S <- sqrt(richness * endemism)
+E <- mean(bhi_msa_bii[["MSA"]], bhi_msa_bii[["BII"]])
+b <- S + E
+c <- bhi_msa_bii[["BHI"]]
+BIp <- b * c
+writeRaster(BIp, file.path(tradeoff_dir, "bio_index.tif"))
 
 # connectivity
-conn_score <- rast(file.path(conn_dir, "circuit/mean_curmap_robust_norm.tif")) %>% 
-    crop(template) %>% mask(template)
+conn_score <- rast(file.path(conn_dir, "circuit/mean_curmap.tif")) %>% 
+    crop(farmable) %>% mask(farmable)
 writeRaster(conn_score, file.path(tradeoff_dir, "conn_index.tif"))
 
 # carbon
-carbon_density <- rast(file.path(carbon_dir, "carbon_density.tif")) %>% resample(template) %>% 
-    crop(template) %>% mask(template)
+carbon_density <- rast(file.path(carbon_dir, "carbon_density.tif")) %>% 
+    resample(farmable) %>% crop(farmable) %>% mask(farmable)
 writeRaster(carbon_density, file.path(tradeoff_dir, "carbon_density.tif"))
 
 # check if all layers align

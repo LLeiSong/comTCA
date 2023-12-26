@@ -15,8 +15,8 @@ library(terra)
 
 ## Compare different scenarios
 data_dir <- "results/scenarios"
-usage <- 65
-land_usage <- 0.653
+usage <- 64
+land_usage <- 0.64
 
 # USG80
 data_dir <- "results/USG80"

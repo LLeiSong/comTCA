@@ -7,11 +7,15 @@
 ## Copyright (c) Lei Song, 2023
 ## Email: lsong@ucsb.edu
 ## --------------------------------------------
-## 5 crops count for about 80% of food production
+## 5 crops count for about 72% of food production
 ## Scenarios to compare:
 ## - Different land usage on existing cropland
-##      - More yield gap close (100 - 150 %)
+##      - More yield gap close (100 - 140 %)
 ##      - More cassava to plant (1 - 5 folds)
+## This script simulate the most possible production increase
+## that can get from intensification in reality considering
+## the distribution of current crop types. They distribute 
+## roughly random, not follow the suitability of crops.
 ## ---------------------------------------------
 
 # Load libraries
@@ -38,6 +42,7 @@ land_intes <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
     cellsizes <- cellSize(pas) / 1e6 * 100
     cropland <- file.path(tdf_dir, "cropland_perc.tif") %>% 
         rast() %>% mask(pas) * cellsizes
+    cropland[cropland <= 0.9] <- NA # a smallholder farm size
     # Only these units will be evaluated
     
     # Gather all inputs and standardize them
@@ -67,18 +72,21 @@ land_intes <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
     names(cnt_ratio) <- c("maize", "rice", "sorghum", "cassava", "beans")
     
     # Make the crops before the run
-    ## Current crops, area * 0.653 * 0.73
-    ## 0.653: planted_area_survey(non_tree_crops) / area_cropland (11765077/18389898) adjust 0.64 to 0.653
+    ## Current crops, area * 0.653 * 0.72
+    ## 0.64: planted_area_survey(non_tree_crops) / area_cropland (11765077/18373875),
     ## 0.72: planted_area_survey(5 crops) / planted_area_survey(non_tree_crops) (8458379 / 11765077)
-    ## The reason to adjust them to match with current production.
-    current_area <- ceiling(nrow(vals_current) * 0.653 * 0.72)
+    ## adjust it to 0.795 here to make sure the final area is around 8458379 
+    ## and so the production is around 12506175.
+    ## The reason to adjust them is that the area within each planning unit is different.
+    current_area <- ceiling(nrow(vals_current) * 0.64 * 0.795)
     nums <- floor(current_area * c(58, 20, 6, 6, 10) / 100)
     nums[5] <- nums[5] + (current_area - sum(nums))
     crops_current <- c(rep(1, nums[1]), rep(2, nums[2]), rep(3, nums[3]), 
                        rep(4, nums[4]), rep(5, nums[5]))
     
     ## Attainable crops, area * 0.72 with different percentage of usage
-    atn_area <- ceiling(nrow(vals_atn) * land_usage * 0.72)
+    ## 0.795 works fine for all land_usage
+    atn_area <- ceiling(nrow(vals_atn) * land_usage * 0.795)
     
     if (cassava == 1){
         nums <- floor(atn_area * c(58, 20, 6, 6, 10) / 100)
@@ -135,8 +143,8 @@ land_intes <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.0){
 }
 
 # Yields with full land
-for (land_usage in c(0.653, 0.8, 1.0)){
-    for (yield in seq(100, 150, 10)){
+for (land_usage in c(0.64, 0.8, 1.0)){
+    for (yield in seq(100, 140, 10)){
         land_intes(tdf_dir, dst_dir, yield, 1, land_usage)
     }
     

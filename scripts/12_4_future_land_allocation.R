@@ -37,7 +37,7 @@ land_allocate <- function(
     name = "Y", # the name for the experiment.
     cbetas, # the prefer factor for each weight, the first one is for yield
     scenario = "Y100", # Y for increased yield gap close, and CASS for increase cassava plant area.
-    land_usage = 0.653, # the percentage of annual land use. 0.65, 0.8, or 1.0
+    land_usage = 0.64, # the percentage of annual land use. 0.64, 0.8, or 1.0
     production_need = 0, # production target (e.g. double)
     # Common setting
     spatial = TRUE,
@@ -531,7 +531,7 @@ option_list <- list(
                               "CASS2, CASS3, CASS4, CASS5].")),
     make_option(c("-l", "--land_usage"), 
                 action = "store", type = 'numeric',
-                help = "The percentage of land usage, [0.653, 0.8, 1.0]."),
+                help = "The percentage of land usage, [0.64, 0.8, 1.0]."),
     make_option(c("-d", "--dst_dir"), 
                 action = "store", type = 'character',
                 help = "The sub-path in results directory to save."))

@@ -11,8 +11,12 @@
 ## 5 crops count for about 80% of food production
 ## Scenarios to compare:
 ## - Different land usage on existing cropland
-##      - More yield gap close (100 - 150 %)
+##      - More yield gap close (100 - 140 %)
 ##      - More cassava to plant (1 - 5 folds)
+## This script simulate the most possible production increase
+## that can get from expansion in reality considering the 
+## distribution of current crop types. They distribute roughly 
+## random, not follow the suitability of crops.
 ## ---------------------------------------------
 
 # Load libraries
@@ -37,9 +41,9 @@ land_potential <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.
     
     # Get specific cell sizes, the same for all layers
     cellsizes <- cellSize(pas) / 1e6 * 100
-    farmable_area <- file.path(tdf_dir, "farmable_perc.tif") %>% 
-        rast() %>% mask(pas) * cellsizes
-    farmable_area[farmable_area <= 0] <- NA
+    farmable_area <- file.path(tdf_dir, "farmable_area.tif") %>% 
+        rast() %>% mask(pas)
+    farmable_area[farmable_area <= 0.9] <- NA
     # Only these units will be evaluated
     
     # Gather all inputs and standardize them
@@ -68,7 +72,9 @@ land_potential <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.
     
     # Make the crops before the run
     ## Attainable crops, area * 0.72 with different percentage of usage
-    atn_area <- ceiling(nrow(vals_atn) * land_usage * 0.72)
+    ## adjust here to 0.74 to make sure the ratio of final area is around 0.46
+    ## because of the uneven farmable area in each planning unit.
+    atn_area <- ceiling(nrow(vals_atn) * land_usage * 0.74)
     
     if (cassava == 1){
         nums <- floor(atn_area * c(58, 20, 6, 6, 10) / 100)
@@ -111,7 +117,7 @@ land_potential <- function(tdf_dir, dst_dir, yield=100, cassava=1, land_usage=1.
 }
 
 # Yields with full land
-for (land_usage in c(0.653, 0.8, 1.0)){
+for (land_usage in c(0.64, 0.8, 1.0)){
     for (yield in seq(100, 140, 10)){
         land_potential(tdf_dir, dst_dir, yield, 1, land_usage)
     }

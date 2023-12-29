@@ -46,6 +46,9 @@ smry_all_exps <- do.call(rbind, lapply(scenarios, function(item){
                 dt <- read.csv(fname)
                 dt <- dt %>% mutate(crop_ratio = cnt_ratio[crop])
                 
+                # Get iteration index
+                iter_n <- strsplit(gsub(".csv", "", basename(fname)), "_")[[1]][5]
+                
                 # Calculate volume to use weight
                 dt$Biodiversity <- dt$Biodiversity * dt$farmable_ratio
                 dt$Carbon <- dt$Carbon * dt$farmable_ratio
@@ -60,65 +63,57 @@ smry_all_exps <- do.call(rbind, lapply(scenarios, function(item){
                            Distance = sum(dt$Distance),
                            farmable_area = sum(dt$farmable_ratio),
                            farmable_area_cultv = sum(dt$farmable_area_cultv),
-                           num_unit = nrow(dt))
+                           num_unit = nrow(dt),
+                           weight = mean(dt$weight),
+                           iter_n = iter_n)
             }, mc.cores = detectCores() - 1))
             
-            simu_list %>% summarise(across(everything(), c(mean, sd))) %>% 
+            simu_list %>% filter(weight == max(weight)) %>% 
+                select(-weight) %>% 
                 mutate(land_usage = usage, scenario = item, change = change)
         }
     }))
 }))
 
-# Tweak a bit
-nms <- names(smry_all_exps)
-nms <- gsub("1", "mean", nms)
-nms <- gsub("2", "sd", nms)
-names(smry_all_exps) <- nms
-
-fname <- file.path(dst_dir, sprintf("summary_scenarios_USG%s_mean_sd.csv", usage))
+fname <- file.path(dst_dir, sprintf("summary_scenarios_USG%s_best.csv", usage))
 write.csv(smry_all_exps, fname, row.names = FALSE)
 
 ## Record everything
 for (item in scenarios) {
-    for(change in changes){
-        message("Start: ", item, " ", change)
-        fnames <- list.files(f_dir, pattern = sprintf("^%s_%s_", item, change), 
-                             full.names = TRUE)
+    for(chg in changes){
+        message("Start: ", item, " ", chg)
         
-        if (length(fnames) != 0){
-            simu_list <- do.call(rbind, mclapply(fnames, function(fname){
-                dt <- read.csv(fname)
-                # Calculate volume to use weight
-                dt$Biodiversity <- dt$Biodiversity * dt$farmable_ratio
-                dt$Carbon <- dt$Carbon * dt$farmable_ratio
-                dt$Connectivity <- dt$Connectivity * dt$farmable_ratio
-                dt$Distance <- dt$Distance * dt$farmable_ratio
-                dt$Production_gain <- dt$Production_gain * 
-                    land_usage * cnt_ratio[dt$crop]
-                
-                # accumulate them
-                dt$Production_gain <- cumsum(dt$Production_gain)
-                dt$Biodiversity <- cumsum(dt$Biodiversity)
-                dt$Carbon <- cumsum(dt$Carbon)
-                dt$Connectivity <- cumsum(dt$Connectivity)
-                dt$Distance <- cumsum(dt$Distance)
-                dt$farmable_ratio <- cumsum(dt$farmable_ratio)
-                
-                dt %>% select('Production_gain', 'Biodiversity', 'Carbon',
-                              'Connectivity',  'Distance', 'farmable_ratio', 
-                              'id')
-            }, mc.cores = 10))
+        iter_n <- smry_all_exps %>% 
+            filter(scenario == item & change == chg) %>% pull(iter_n)
+        fname <- file.path(
+            f_dir, sprintf("%s_%s_USG%s_simu_%s.csv", 
+                           item, chg, usage, iter_n))
+        
+        if (length(fname) != 0){
+            dt <- read.csv(fname)
             
-            simu_mean <- simu_list %>% group_by(id) %>% 
-                summarise(across(everything(), mean))
+            # Calculate volume to use weight
+            dt$Biodiversity <- dt$Biodiversity * dt$farmable_ratio
+            dt$Carbon <- dt$Carbon * dt$farmable_ratio
+            dt$Connectivity <- dt$Connectivity * dt$farmable_ratio
+            dt$Distance <- dt$Distance * dt$farmable_ratio
+            dt$Production_gain <- dt$Production_gain * 
+                land_usage * cnt_ratio[dt$crop]
             
-            simu_sd <- simu_list %>% group_by(id) %>% 
-                summarise(across(everything(), sd))
+            # accumulate them
+            dt$Production_gain <- cumsum(dt$Production_gain)
+            dt$Biodiversity <- cumsum(dt$Biodiversity)
+            dt$Carbon <- cumsum(dt$Carbon)
+            dt$Connectivity <- cumsum(dt$Connectivity)
+            dt$Distance <- cumsum(dt$Distance)
+            dt$farmable_ratio <- cumsum(dt$farmable_ratio)
             
-            fname <- file.path(dst_dir, sprintf("%s_%s_USG%s_simu_mean.csv", item, change, usage))
-            write.csv(simu_mean, fname, row.names = FALSE)
-            fname <- file.path(dst_dir, sprintf("%s_%s_USG%s_simu_sd.csv", item, change, usage))
-            write.csv(simu_sd, fname, row.names = FALSE)
+            dt %>% select('Production_gain', 'Biodiversity', 'Carbon',
+                          'Connectivity',  'Distance', 'farmable_ratio', 
+                          'id')
+            
+            fname <- file.path(dst_dir, sprintf("%s_%s_USG%s_simu_best.csv", item, chg, usage))
+            write.csv(dt, fname, row.names = FALSE)
         }
     }
 }
@@ -127,31 +122,35 @@ for (item in scenarios) {
 f_dir <- file.path(data_dir, "spatial")
 
 for (item in scenarios) {
-    for(change in changes){
-        message("Start: ", item, " ", change)
-        fnames <- list.files(f_dir, pattern = sprintf("^%s_%s_", item, change), 
-                             full.names = TRUE)
-        if (length(fnames) != 0){
+    for(chg in changes){
+        message("Start: ", item, " ", chg)
+        
+        iter_n <- smry_all_exps %>% 
+            filter(scenario == item & change == chg) %>% pull(iter_n)
+        fname <- file.path(
+            f_dir, sprintf("%s_%s_USG%s_simu_%s.tif", 
+                           item, chg, usage, iter_n))
+        
+        if (length(fname) != 0){
             # Read layers
-            lyrs <- rast(fnames)
+            lyrs <- rast(fname)
             
             # For crops
             crps <- do.call(c, lapply(1:5, function(crp){
                 lyr <- lyrs
                 lyr[lyr != crp] <- NA
                 lyr[lyr == crp] <- 1
-                sum(lyr, na.rm = TRUE)
+                lyr
             }))
             
             # Overall
             ovr <- lyrs
             ovr[ovr > 0] <- 1
-            ovr <- sum(ovr, na.rm = TRUE)
             
             out <- c(ovr, crps)
             names(out) <- c('farmland', "maize", "paddy", "sorghum", "cassava", "beans")
             
-            fname <- file.path(dst_dir, sprintf("%s_%s_USG%s_simu.tif", item, change, usage))
+            fname <- file.path(dst_dir, sprintf("%s_%s_USG%s_best.tif", item, chg, usage))
             writeRaster(out, fname)
         }
     }

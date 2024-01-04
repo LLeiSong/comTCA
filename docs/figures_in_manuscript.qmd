@@ -350,6 +350,11 @@ pas <- pas %>%
     slice(unique(unlist(st_intersects(bry, pas)))) %>% 
     st_simplify()
 
+# Highlight areas
+areas <- st_read('data/osm/areas_fig3.geojson') %>% 
+    st_intersection(., bry)
+areas$name[2] <- "Lake\nVictoria"
+
 # Overall agreement
 g1 <- ggplot() +
     geom_sf(data = pas, color = "#E5F5E0", 
@@ -360,6 +365,26 @@ g1 <- ggplot() +
         palette = "Plasma", na.value = NA,
         guide = guide_colourbar(
             title.position = "top", title.hjust = 0.5)) +
+    geom_sf(data = areas, color = "black",
+            fill = "transparent", linewidth = 0.3) +
+    geom_sf_text(data = areas[2, ], fontface='bold',
+                 aes(label = "Lake"), nudge_y = 0.8, nudge_x = 0.5,
+                 colour = "black", size = 3) +
+    geom_sf_text(data = areas[2, ], fontface='bold',
+                 aes(label = "Victoria"), nudge_y = 0.5, nudge_x = 0.5,
+                 colour = "black", size = 3) +
+    geom_sf_text_repel(data = areas[3, ], fontface='bold',
+            aes(label = name), colour = "black", size = 3, 
+            nudge_y = 1.2, nudge_x = 0.3, force = 100) +
+    geom_sf_text_repel(data = areas[1, ], fontface='bold',
+            aes(label = name), colour = "black", size = 3, 
+            nudge_y = 0.9, nudge_x = -0.2, force = 100) +
+    geom_sf_text_repel(data = areas[4, ], fontface='bold',
+            aes(label = name), colour = "black", size = 3, 
+            nudge_y = 1.2, nudge_x = -1.4, force = 100) +
+    geom_sf_text_repel(data = areas[5, ], fontface='bold',
+            aes(label = name), colour = "black", size = 3, 
+            nudge_y = -1.5, nudge_x = 0, force = 100) +
     geom_sf(data = bry, color = "black", 
             fill = "transparent", linewidth = 0.6) +
     coord_sf() + theme_void() +

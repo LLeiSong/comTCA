@@ -47,23 +47,17 @@ land_allocate <- function(
     spatial = TRUE,
     seed = 123,
     dst_dir){
-    
-    # Create directories
-    num_dir <- file.path(dst_dir, "numbers")
-    if (!dir.exists(num_dir)) dir.create(num_dir)
-    spatial_dir <- file.path(dst_dir, "spatial")
-    if (!dir.exists(spatial_dir)) dir.create(spatial_dir)
-    
     # Re-calculate weights 
     calib_weights <- lapply(names(cbetas), function(name){
         weights[[name]] * cbetas[name]})
     names(calib_weights) <- names(weights)
     
     # Get the production gain from expansion
+    fact <- as.integer(paste0(c("1", rep("0", floor(log10(production_need)))), collapse = ""))
     cnt_ratio <- c(0.88, 0.88, 0.87, 0.33, 0.86)
     names(cnt_ratio) <- c("maize", "paddy", "sorghum", "cassava", "beans")
     prod_gain_exp <- do.call(c, lapply(names(atn_yields), function(crp){
-        atn_yields[[crp]] * (farmable_area * land_usage) * cnt_ratio[[crp]] / 1e6}))
+        atn_yields[[crp]] * (farmable_area * land_usage) * cnt_ratio[[crp]] / fact}))
     
     # Get the ratio of each crop
     cassava <- ifelse(
@@ -89,14 +83,15 @@ land_allocate <- function(
     # Merge all weights
     pus <- do.call(c, lapply(names(calib_weights$Yield), function(crp){
         pu <- do.call(c, lapply(1:length(calib_weights), 
-                      function(n) calib_weights[[n]][[crp]])) %>% sum()
+                                function(n) calib_weights[[n]][[crp]])) %>% sum()
         pu * farmable_area
     }))
     names(pus) <- names(calib_weights$Yield)
     
     # Calculate the initial targets
     # sum(area * ratios * yields) = production_need
-    areas <- production_need / 1e6 / sum(ratios * c(2.77, 11.75, 7.68, 24.07, 2.62))
+    # NOTE: this numbers may need to tweek a bit to make a good initial run and faster converge
+    areas <- production_need / fact / sum(ratios * c(2.77, 11.75, 7.68, 24.07, 2.62))
     prod_targets <- areas * ratios * c(2.77, 11.75, 7.68, 24.07, 2.62)
     names(prod_targets) <- c("maize", "paddy", "sorghum", "cassava", "beans")
     
@@ -111,12 +106,12 @@ land_allocate <- function(
         pus,
         zones(prod_gain_exp, prod_gain_exp,
               prod_gain_exp, prod_gain_exp, prod_gain_exp,
-            zone_names = names(pus),
-            feature_names = names(prod_gain_exp))) %>%
+              zone_names = names(pus),
+              feature_names = names(prod_gain_exp))) %>%
         add_min_set_objective() %>%
         add_absolute_targets(targets) %>%
         add_binary_decisions() %>% 
-        add_gurobi_solver(threads = 10, gap = 0, verbose = FALSE)
+        add_gurobi_solver(threads = 12, gap = 0, verbose = FALSE)
     s <- solve(p)
     
     ########################## Start the converge ##########################
@@ -132,7 +127,7 @@ land_allocate <- function(
         }
         
         prod_targets <- prod_targets * ((ratios - ratios_run) / ratios_run + 1)
-        prod_targets <- production_need / 1e6 * (prod_targets / sum(prod_targets))
+        prod_targets <- production_need / fact * (prod_targets / sum(prod_targets))
         
         targets <- do.call(cbind, lapply(names(prod_targets), function(crp){
             prod_target_crp <- prod_targets
@@ -150,38 +145,30 @@ land_allocate <- function(
             add_min_set_objective() %>%
             add_absolute_targets(targets) %>%
             add_binary_decisions() %>% 
-            add_gurobi_solver(threads = 10, gap = 0, verbose = FALSE)
+            add_gurobi_solver(threads = 12, gap = 0, verbose = FALSE)
         s <- solve(p)
     }
     
     ############################ Allocate values ############################
     # Great, the solver has been converged, now allocates all values to pixels
-    if (spatial){
-        ## Spatial map
-        crps <- c("maize", "paddy", "sorghum", 'cassava', "beans")
-        agro_land <- category_layer(s)
-        names(agro_land) <- "crop"; agro_land[agro_land == 0] <- NA
-        levels(agro_land) <- data.frame(id = 1:5, crop = crps)
-        dst_fname <- file.path(
-            spatial_dir, sprintf("%s_%s_USG%s.tif", name, scenario, round(land_usage * 100, 0)))
-        writeRaster(agro_land, dst_fname, datatype = "INT1U", overwrite = TRUE)
-    }
-    
     ## Values
+    agro_land <- category_layer(s)
+    names(agro_land) <- "crop"; agro_land[agro_land == 0] <- NA
     lyrs <- c(agro_land, costs, farmable_area, 
-              max(pus * s), max(prod_gain_exp * s) * 1e6)
+              max(pus * s), max(prod_gain_exp * s) * fact)
     names(lyrs)[7:8] <- c("weight", "production_gain")
     vals <- values(lyrs) %>% na.omit() %>% data.frame()
     
     dst_fname <- file.path(
-        num_dir, sprintf("%s_%s_USG%s.csv", name, scenario, round(land_usage * 100, 0)))
+        dst_dir, sprintf("%s_%s_USG%s.csv", name, scenario, round(land_usage * 100, 0)))
     write.csv(vals, dst_fname, row.names = FALSE)
 }
 
 # Set directories
 tdf_dir <- "data/tradeoff"
 intes_dir <- "results/intensification"
-dst_dir <- "results"
+dst_dir <- "results/trajectories"
+if (!dir.exists(dst_dir)) dir.create(dst_dir)
 
 # Mask out the protected areas
 pas <- rast(file.path(tdf_dir, "protected_areas.tif"))
@@ -191,43 +178,14 @@ pas[pas == 1] <- NA
 farmable_area <- rast(file.path(tdf_dir, "farmable_area.tif"))
 # Only these units will be evaluated
 
-# Command line inputs
-option_list <- list(
-    make_option(c("-s", "--seed"), 
-                action = "store", default = 1, type = 'integer',
-                help = "The seed for the iteration [default %default]"),
-    make_option(c("-c", "--cbetas"), 
-                action = "store", type = 'character',
-                help = paste0("The weights for yield, biodiversity, ",
-                              "carbon, connectivity and distance in order.")),
-    make_option(c("-o", "--scenario"), 
-                action = "store", type = 'character',
-                help = paste0("The scenario for the simulation, ",
-                              "[Y100, Y110, Y120, Y130, Y140, ",
-                              "CASS2, CASS3, CASS4, CASS5].")),
-    make_option(c("-l", "--land_usage"), 
-                action = "store", type = 'numeric',
-                help = "The percentage of land usage, [0.65, 0.8, 1.0]."),
-    make_option(c("-p", "--production_need"), 
-                action = "store", default = 1, type = 'numeric',
-                help = "The production to catch from land expansion."),
-    make_option(c("-d", "--dst_dir"), 
-                action = "store", type = 'character',
-                help = "The sub-path in results directory to save."))
-opt <- parse_args(OptionParser(option_list = option_list))
-seed <- opt$seed
-cbetas <- opt$cbetas
-cbetas <- as.numeric(strsplit(cbetas, ",")[[1]])
-scenario <- opt$scenario
-land_usage <- as.numeric(opt$land_usage)
+# Parameters
+seed <- 1
+scenario <- "Y100"
+land_usage <- 0.64
 yield_num <- ifelse(
     str_detect(scenario, "Y"), str_extract(scenario, "[0-9]+"), 100)
 cassava <- ifelse(
     str_detect(scenario, "CASS"), str_extract(scenario, "[0-9]+"), 1)
-
-# Make directory for the results
-dst_dir <- file.path(dst_dir, opt$dst_dir)
-if (!dir.exists(dst_dir)) dir.create(dst_dir)
 
 # Get the right attainable yield layer
 atn_yield_fname <- file.path(
@@ -272,24 +230,68 @@ fname <- file.path(
     intes_dir, sprintf("prod_gain_CASS%s_Y%s_USG%s.csv", 
                        cassava, yield_num, round(land_usage * 100, 0)))
 prod_intes <- read.csv(fname)
-message(sprintf("Read production increase for: %s.", basename(fname)))
-
 production_need <- mean(prod_intes$Current_production) * 2 - 
     mean(prod_intes$Attainable_production)
 message(sprintf("Get production remaining to get: %s.", 
                 round(production_need, 2)))
 
-# Set the factors
-cbetas <- c("Yield" = cbetas[1], "Biodiversity" = cbetas[2], "Carbon" = cbetas[3], 
-            "Connectivity" = cbetas[4], "Distance" = cbetas[5])
-exp_name <- paste(c("Y", "B", "Ca", "Co", "D")[cbetas != 0], collapse = "")
+cbeta_list <- c("1,0,0,0,0", "0,1,0,0,0", "0,0,1,0,0", "0,0,0,1,0", 
+                "0,0,0,0,1", "0.5,0,0,0,0.5", "0,0.33,0.33,0.33,0", 
+                "0.25,0.25,0.25,0,0.25", "0.2,0.2,0.2,0.2,0.2")
 
-# Start the run
-if (production_need > 0){
-    land_allocate(
-        atn_yields, farmable_area, weights, costs, 
-        exp_name, cbetas, scenario, land_usage, production_need, 
-        TRUE, seed, dst_dir)
-} else {
-    message("No more land is needed.")
+for (cbetas in cbeta_list){
+    message(cbetas)
+    cbetas <- as.numeric(strsplit(cbetas, ",")[[1]])
+    
+    # Set the factors
+    cbetas <- c("Yield" = cbetas[1], "Biodiversity" = cbetas[2], "Carbon" = cbetas[3], 
+                "Connectivity" = cbetas[4], "Distance" = cbetas[5])
+    exp_name <- paste(c("Y", "B", "Ca", "Co", "D")[cbetas != 0], collapse = "")
+    
+    prod_need_list <- seq(500000, production_need, 100000)
+    prod_need_list <- c(prod_need_list[-length(prod_need_list)], production_need)
+    # Start the run
+    path <- do.call(rbind, lapply(1:length(prod_need_list), function(n){
+        # Get target
+        production_need <- prod_need_list[n]
+        
+        # Land allocation
+        land_allocate(
+            atn_yields, farmable_area, weights, costs, 
+            exp_name, cbetas, scenario, land_usage, production_need, 
+            TRUE, seed, dst_dir)
+        
+        # Read the result
+        fname <- file.path(
+            dst_dir, sprintf("%s_%s_USG%s.csv", exp_name, scenario, round(land_usage * 100, 0)))
+        dt <- read.csv(fname)
+        
+        # Calculate volume to use weight
+        dt$Biodiversity <- dt$Biodiversity * dt$farmable_ratio
+        dt$Carbon <- dt$Carbon * dt$farmable_ratio
+        dt$Connectivity <- dt$Connectivity * dt$farmable_ratio
+        dt$Distance <- dt$Distance * dt$farmable_ratio
+        
+        # Accumulate them
+        dt <- data.frame(Biodiversity = sum(dt$Biodiversity),
+                   Carbon = sum(dt$Carbon),
+                   Connectivity = sum(dt$Connectivity),
+                   Distance = sum(dt$Distance),
+                   farmable_area = sum(dt$farmable_ratio),
+                   num_unit = nrow(dt),
+                   weight = mean(dt$weight)) %>% 
+            mutate(production = production_need)
+        
+        # Save temp file in case the script is break
+        # dst_fname <- file.path(dst_dir, sprintf("%s_trajectory_%s.csv", exp_name, n))
+        # write.csv(dt, dst_fname, row.names = FALSE)
+        file.remove(fname)
+        
+        # Return
+        dt
+    }))
+    
+    dst_fname <- file.path(dst_dir, sprintf("%s_trajectory.csv", exp_name))
+    write.csv(path, dst_fname, row.names = FALSE)
 }
+

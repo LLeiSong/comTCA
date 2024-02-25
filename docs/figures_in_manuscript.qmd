@@ -159,14 +159,14 @@ f_dir <- "results/scenarios/summary"
 items <- c("Y", "I", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
 
 # Load dataset
-vals_cmpr <- read.csv(file.path(f_dir, "summary_scenarios_USG64_best.csv")) %>% 
+vals_cmpr <- read.csv(file.path(f_dir, "summary_scenarios_USGs.csv")) %>% 
+    filter(land_usage == 0.64) %>% 
+    filter(change == "Y100") %>% 
     filter(scenario %in% items) %>% 
     mutate(scenario = factor(
         scenario, levels = items, labels = items)) %>% 
-    filter(change == "Y100") %>% 
     mutate(farmable_area_intense = farmable_area / num_unit) %>% 
-    select(-c(land_usage, change, num_unit, num_unit, iter_n,
-              farmable_area_cultv, farmable_area_cultv))
+    select(-c(land_usage, change, num_unit, weight))
 names(vals_cmpr) <- c("B", "Ca", "Co", "D", "Y", "scenario", "I")
 
 # Figure
@@ -193,7 +193,7 @@ fig_list <- lapply(c("Y", "I", "B", "Ca", "Co", "D"), function(item){
     if (str_detect(item, "Y")){
         vals$value <- vals$value / 1e6
         xlab_nm <- expression(paste("New cropland area (ha * ", 10^6, ")     "))
-    }else if (str_detect(item, "I")){
+    } else if (str_detect(item, "I")){
         vals$value <- vals$value
         xlab_nm <- "New cropland area / No. of unit (ha)               "
     } else if (str_detect(item, "B")) {
@@ -206,8 +206,8 @@ fig_list <- lapply(c("Y", "I", "B", "Ca", "Co", "D"), function(item){
         vals$value <- vals$value / 1e6
         xlab_nm <- expression(paste("Connectivity loss (", 10^5, ")"))
     } else if (str_detect(item, "D")){
-        vals$value <- vals$value / 60 / 1e7
-        xlab_nm <- expression(paste("Travel time increase (hours * ", 10^7, ")            "))}
+        vals$value <- vals$value / 60 / 1e6
+        xlab_nm <- expression(paste("Travel time increase (hours * ", 10^6, ")            "))}
     
     # Make figure
     ggplot(data = vals) + 
@@ -249,50 +249,57 @@ ggsave("figures/figure2_factor_compare.png",
 ### Figure S12
 
 ```{r}
-f_dir <- "results/scenarios/summary"
-items <- c("Y", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
-simu_mean <- do.call(rbind, lapply(items, function(item){
-    read.csv(sprintf("%s/%s_Y100_USG64_simu_best.csv", f_dir, item)) %>% 
-        mutate(mod = item)
-})) %>% mutate(mod = factor(mod, levels = items, labels = items))
-
+# Starting point
 prod_gain_intense <- read.csv(
     file.path("results/intensification", "prod_gain_CASS1_Y100_USG64.csv"))
 pgi_mean <- mean(prod_gain_intense$Production_gain) / 1e6
 pgi_sd <- sd(prod_gain_intense$Production_gain) / 1e6
 
-fig_list <- lapply(names(simu_mean)[2:6], function(ele){
-    vals <- simu_mean %>% select(all_of(c("farmable_ratio", "mod", ele)))
+# Read trajectories
+f_dir <- "results/trajectories"
+items <- c("Y", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
+simus <- do.call(rbind, lapply(items, function(item){
+    read.csv(sprintf("%s/%s_trajectory.csv", f_dir, item)) %>% 
+        select(c('production', 'Biodiversity', "Carbon", "Connectivity", 
+                 "Distance", "farmable_area")) %>% 
+        rbind(data.frame(
+            production = 0, Biodiversity = 0, Carbon = 0,
+            Connectivity = 0, Distance = 0, farmable_area = 0), .) %>% 
+        mutate(mod = item)
+})) %>% mutate(mod = factor(mod, levels = items, labels = items))
+
+fig_list <- lapply(names(simus)[1:5], function(ele){
+    vals <- simus %>% select(all_of(c("farmable_area", "mod", ele)))
     names(vals)[3] <- "value"
-    vals$farmable_ratio <- vals$farmable_ratio / 1e6
+    vals$farmable_area <- vals$farmable_area / 1e6
     
     # Separate different conditions
-    if (str_detect(ele, "Production")){
-        vals$value <- vals$value / 1e6 + pgi_mean
-        ylab_nm <- expression(paste("Production gain (tons * ", 10^6, ")"))
+    if (str_detect(ele, "production")){
+        vals$value <- vals$value / 1e7 + pgi_mean
+        ylab_nm <- expression(paste("Production gain (tons * ", 10^7, ")"))
     } else if (str_detect(ele, "Biodiversity")) {
-        vals$value <- vals$value / 1e5
-        ylab_nm <- expression(paste("Biodiversity loss (", 10^5, ")"))
+        vals$value <- vals$value / 1e6
+        ylab_nm <- expression(paste("Biodiversity loss (", 10^6, ")"))
     } else if (str_detect(ele, "Carbon")){
-        vals$value <- vals$value / 1e7
-        ylab_nm <- expression(paste("Carbon loss (tons * ", 10^7, ")"))
+        vals$value <- vals$value / 1e6
+        ylab_nm <- expression(paste("Carbon loss (tons * ", 10^6, ")"))
     } else if (str_detect(ele, "Connectivity")){
-        vals$value <- vals$value / 1e5
-        ylab_nm <- expression(paste("Connectivity loss (", 10^5, ")"))
+        vals$value <- vals$value / 1e4
+        ylab_nm <- expression(paste("Connectivity loss (", 10^4, ")"))
     } else {
         vals$value <- vals$value / 60 / 1e6
         ylab_nm <- expression(paste("Travel time increase (hours * ", 10^6, ")     "))
     }
     
-    p <- ggplot(vals, aes(x = farmable_ratio, y = value)) + 
+    p <- ggplot(vals, aes(x = farmable_area, y = value)) + 
         geom_line(aes(color = mod)) + 
         scale_color_npg(name = "Planning type")
     
-    if (str_detect(ele, "Production")){
-        p <- p + geom_point(aes(x = min(farmable_ratio), y = pgi_mean), size = 0.8) +
-            geom_errorbar(aes(x = min(farmable_ratio), y = pgi_mean,
-                              ymin = pgi_mean - pgi_sd, ymax = pgi_mean + pgi_sd), 
-                          width = .2, position = position_dodge(0.05)) + 
+    if (str_detect(ele, "production")){
+        p <- p + geom_point(aes(x = min(farmable_area), y = pgi_mean), size = 0.8) +
+            # geom_errorbar(aes(x = min(farmable_area), y = pgi_mean,
+            #                   ymin = pgi_mean - pgi_sd, ymax = pgi_mean + pgi_sd), 
+            #               width = .2, position = position_dodge(0.05)) + 
             annotate(geom = "text", x = 0.25, hjust = 0, size = 2.1,
                      y = pgi_mean, label = "Production gain from existing cropland")
     }
@@ -323,11 +330,18 @@ ggsave("figures/S12_trajectories_scenarios.png",
 
 ```{r}
 # Summarize the maps
-fnames <- list.files(f_dir, full.names = TRUE, pattern = "Y100_USG64_best.tif")
+f_dir <- "results/scenarios/spatial"
+fnames <- list.files(f_dir, full.names = TRUE, pattern = "Y100_USG64.tif$")
 maps <- lapply(fnames, function(fname){
     rst <- rast(fname)
     rst[is.na(rst)] <- 0
-    rst
+    lyrs <- do.call(c, lapply(0:5, function(x) {
+        if (x == 0){
+            rst > 0
+        } else rst == x
+    }))
+    names(lyrs) <- c("farmland", "Maize", "Paddy", "Sorghum", "Cassava", "Beans")
+    lyrs
 })
 
 layers <- do.call(c, lapply(names(maps[[1]]), function(lyr){
@@ -400,8 +414,9 @@ g2 <- ggplot(vals, aes(x = from, y = to, fill = agreement)) +
     geom_tile(color = "white") + coord_equal() + labs(x = "", y = "") +
     geom_text(aes(from, to, label = round(agreement, 0)), 
               color = "white", size = 3) +
-    scale_fill_continuous_sequential(limits = c(0, 80),
-                                     name = expression("IoU (" %*% "100)"), palette = "Plasma") +
+    scale_fill_continuous_sequential(
+        limits = c(0, 87), name = expression("IoU (" %*% "100)"), 
+        palette = "Plasma") +
     theme_minimal() +
     theme(axis.title.x = element_blank(),
           axis.title.y = element_blank(),
@@ -482,7 +497,7 @@ fig_list <- lapply(c("Maize", "Paddy", "Sorghum", "Cassava", "Beans"),
         geom_tile(color = "white") + coord_equal() + labs(x = "", y = "") +
         geom_text(aes(from, to, label = round(agreement, 0)), 
                   color = "white", size = 3) +
-        scale_fill_continuous_sequential(limits = c(0, 87),
+        scale_fill_continuous_sequential(limits = c(0, 94),
             name = expression("IoU (" %*% "100)"), palette = "Plasma") +
         theme_minimal() +
         theme(axis.title.x = element_blank(),
@@ -607,15 +622,18 @@ Compare the hybrid mode for different scenarios: baseline (Y100, CASS1), yield g
 ```{r}
 # Summarize the maps
 fnames <- list.files(
-    "results/scenarios/summary", 
-    full.names = TRUE, pattern = "^YBCaCoD.+.tif")
-fnames <- c(fnames, list.files(
-    "results/USG80/summary", 
-    full.names = TRUE, pattern = "^YBCaCoD.+.tif"))
+    "results/scenarios/spatial", 
+    full.names = TRUE, pattern = "^YBCaCoD.+.tif$")
 maps <- lapply(fnames, function(fname){
     rst <- rast(fname)
     rst[is.na(rst)] <- 0
-    rst
+    lyrs <- do.call(c, lapply(0:5, function(x) {
+        if (x == 0){
+            rst > 0
+        } else rst == x
+    }))
+    names(lyrs) <- c("farmland", "Maize", "Paddy", "Sorghum", "Cassava", "Beans")
+    lyrs
 })
 
 # Make the figure
@@ -725,21 +743,27 @@ dat <- data.frame(
 dat2 <- data.frame(x = 1:2, y = 1:2, z = c("64", "80")) %>% 
     mutate(z = factor(z, levels = c("64", "80"), labels = c("64", "80")))
 legend <-  ggplot() + 
+    geom_raster(data = dat2, aes(x = x, y = y, fill = z)) +
+    scale_fill_manual('Land usage',
+                      values = c("white", "white"), 
+                      labels = c("          64%", "          80%"),
+                      guide = guide_legend(
+                          title.position = "top", 
+                          title.hjust = 2, direction = "vertical", 
+                          order = 1)) +
+    new_scale_fill() +
     geom_raster(data = dat,  aes(x = x, y = y, fill = rst)) +
     scale_fill_manual('Suggested crop',
                       values = crop_cols,
                       labels = c("Maize", "", "Paddy rice", "", "Sorghum", "", 
                                  "Cassava", "", "Common beans", ""),
-                      guide = guide_legend(title.position = "top", 
-                                           title.hjust = 0.5)) +
-    new_scale_fill() +
-    geom_raster(data = dat2, aes(x = x, y = y, fill = z)) +
-    scale_fill_manual('Land usage (%)',
-                      values = c("grey", "Black"), labels = c("64", "80"),
-    )+
+                      guide = guide_legend(
+                          title.position = "top", 
+                          title.hjust = 0.5, direction = "horizontal",
+                          order = 2)) +
     theme(legend.text = element_text(size = 10),
-          legend.position = "top", legend.direction = "horizontal")+
-    guides(fill = guide_legend(title.position = "top", title.hjust = 0.5))
+          legend.position = "top", 
+          legend.box = "horizontal")
 legend_lc <- get_legend(legend)
 
 g1 <- ggarrange(legend_lc, ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
@@ -747,35 +771,26 @@ g1 <- ggarrange(legend_lc, ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
                 nrow = 2, ncol = 1, heights = c(3, 10))
 
 # New area and ecological costs change
-vals_64 <- read.csv(
+vals <- read.csv(
     file.path("results/scenarios/summary", 
-              "summary_scenarios_USG64_best.csv")) %>% 
+              "summary_scenarios_USGs.csv")) %>% 
     filter(scenario == "YBCaCoD") %>% 
-    select(-c(scenario, num_unit, iter_n, farmable_area_cultv))
-names(vals_64) <- c("B", "Ca", "Co", "D", "Y", "USG", "Practice")
+    select(-c(scenario, num_unit, weight))
+names(vals) <- c("B", "Ca", "Co", "D", "Y", "USG", "Practice")
 
-vals_80 <- read.csv(
-    file.path("results/USG80/summary", 
-              "summary_scenarios_USG80_best.csv")) %>% 
-    filter(scenario == "YBCaCoD") %>% 
-    select(-c(scenario, num_unit, iter_n, farmable_area_cultv))
-names(vals_80) <- c("B", "Ca", "Co", "D", "Y", "USG", "Practice")
-
-vals <- vals_64 %>% pivot_longer(
-    c("B", "Ca", "Co", "D", "Y"), names_to = "Element") %>% 
-    rbind(vals_80 %>% pivot_longer(
-        c("B", "Ca", "Co", "D", "Y"), names_to = "Element"))
+vals <- vals %>% pivot_longer(
+    c("B", "Ca", "Co", "D", "Y"), names_to = "Element")
 vals <- vals %>% group_by(Element) %>% 
     reframe(USG = USG, Practice = Practice,
             value = value / max(value) * 100) %>% 
-    mutate(USG = factor(USG, labels = c("64", "80"), levels = c(64, 80))) %>% 
+    mutate(USG = factor(USG, labels = c("64%", "80%"), levels = c(0.64, 0.8))) %>% 
     mutate(Practice = factor(Practice, labels = c("A", "B", "C"),
                              levels = c("Y100", "CASS3", "Y140"))) %>% 
     mutate(Element = factor(
         Element, levels = c("Y", "B", "Ca", "Co", "D"),
         labels = c("New cropland area", "Biodiveristy loss", "Carbon loss",
                    "Connectivity loss", "Travel time increase")))
-vals <- vals %>% mutate(group = ifelse(USG == 64 & Practice == "A", "B", "P"))
+vals <- vals %>% mutate(group = ifelse(USG == "64%" & Practice == "A", "B", "P"))
 
 g2 <- ggplot(data = vals) + 
     geom_linerange(aes(
@@ -788,7 +803,7 @@ g2 <- ggplot(data = vals) +
               size = 3, color = "black", fontface = "bold",
               position = position_dodge2(width = 0.7)) + 
     scale_color_manual(values = c("#d73027", "black")) +
-    xlab("") + ylab("Percentage") + labs(linetype = "Land usage (%)") +
+    xlab("") + ylab("Percentage") + labs(linetype = "Land usage") +
     facet_grid(~Element) +
     theme_light() +
     theme(panel.grid.major.x = element_blank(),

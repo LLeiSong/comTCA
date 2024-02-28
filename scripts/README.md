@@ -40,7 +40,8 @@ Note: the range sizes calculated from step 8 are all in pixels. Step 9 convert p
 2. Run `12_2_prod_gain_from_ints.R` to first get the production growth on existing cropland, which will determine the needed area of extra cropland.
 3. Run `12_3_prod_potential_farmable_land.R` (Optional) to get the production potential for all existing and farmable area.
 4. Run `12_4_future_land_allocation.R` and various setting parameters to allocate land for future agriculture.
-5. Run `12_5_gather_results.R` to collect and summarize the simulation results.
+5. Run `12_4_future_allocation_path.R` with various production target to get the growing trajectories of costs and benefits.
+6. Run `12_5_gather_results.R` to collect and summarize the simulation results.
 
 Note: Some scripts are designed to take command line inputs to conveniently submit to HPC for parallel computation. The slurm schedulers can be found in folder `~schedulers`. 
 

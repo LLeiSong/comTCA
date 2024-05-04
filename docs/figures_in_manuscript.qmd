@@ -345,6 +345,171 @@ ggsave("figures/S12_trajectories_scenarios.png",
 ### Figure 3
 
 ```{r}
+# Read files
+smry_all_exps <- read.csv(
+    file.path("results/profit/summary", "summary_profit.csv"))
+smry_others <- read.csv(
+    file.path("results/scenarios/summary", "summary_scenarios_USGs.csv")) %>% 
+    filter(change == "Y100") %>% 
+    filter(land_usage == 0.64)
+smry_sup <- smry_others %>% filter(scenario == "Y") %>% 
+    cbind(., rep(row.names(.), each = 4)) %>% 
+    select(names(smry_others)) %>% 
+    mutate(scenario = c('YB0', "YCa0", 'YCo0', "YD0")) %>% 
+    rbind(smry_others %>% filter(scenario %in% c("B", "Ca", "Co", "D")) %>% 
+              mutate(scenario = c("YB10", "YCa10", "YCo10", "YD10")))
+    
+smry_all_exps <- rbind(smry_all_exps, smry_sup)
+smry_all_exps <- smry_all_exps %>% 
+    mutate(group = str_extract(scenario, "[A-Z|a-z]+")) %>% 
+    mutate(group = gsub("Y", "", group))
+smry_all_exps <- smry_all_exps %>% 
+    mutate(weight = as.numeric(str_extract(scenario, "[0-9]+")) / 10)
+
+# Format the data
+vals <- smry_all_exps
+hybrid <- smry_others %>% 
+    filter(scenario == "YBCaCoD") %>% mutate(group = "hybrid") %>% 
+    mutate(weight = 0.2)
+vals <- rbind(vals, hybrid)
+names(vals)[1:4] <- c("B", "Ca", "Co", "D")
+
+vals <- do.call(rbind, lapply(unique(vals$group)[-5], function(fct){
+    v <- vals %>% filter(group == fct) %>% 
+        rbind(vals %>% filter(group == "hybrid")) %>% 
+        select(all_of(c(fct, "farmable_area", "weight", "group"))) %>% 
+        rename(value = fct)
+    v %>% 
+        mutate(value = value / 
+                   (v %>% filter(weight == 0) %>% pull(value)) * 100) %>% 
+        mutate(farmable_area = farmable_area / 
+                   (v %>% filter(weight == 0) %>% pull(farmable_area)) * 100) %>% 
+        mutate(type = ifelse(group == fct, "line", "point")) %>% 
+        mutate(group = fct)
+}))
+
+# Make figures
+g1 <- ggplot() +
+    geom_line(data = vals %>% filter(type == "line"), 
+              aes(x = weight, y = farmable_area, color = group)) +
+    geom_vline(xintercept = 0.2, linetype = "dashed") +
+    geom_point(data = vals %>% filter(type == "point"), 
+              aes(x = weight, y = farmable_area, color = group)) +
+    xlab("Weight") + ylab("Expand area increase (%)") +
+    scale_color_npg(name = "Decision-making factor") +
+    theme_light() +
+    theme(panel.grid.major.y = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks.x = element_blank()) +
+    theme(panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_line(
+              color = "lightgrey", linetype = "dashed"),
+          panel.grid.minor.x = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks.x = element_blank(),
+          text = element_text(size = 10, color = "black"),
+          axis.title = element_text(color = "black", size = 10),
+          axis.text = element_text(color = "black", size = 10),
+          legend.text = element_text(size = 12, color = "black"),
+          legend.title = element_text(size = 12, color = "black"),
+          legend.position = "top",
+          plot.margin = unit(c(0.1, 0.2, 0.1, 0.2), "cm"))
+    
+g2 <- ggplot() +
+    geom_line(data = vals %>% filter(type == "line"), 
+              aes(x = weight, y = value, color = group)) +
+    geom_vline(xintercept = 0.2, linetype = "dashed") +
+    geom_point(data = vals %>% filter(type == "point"), 
+              aes(x = weight, y = value, color = group)) +
+    xlab("Weight") + ylab("Cost decrease (%)") +
+    scale_color_npg(name = "Decision-making factor") +
+    theme_light() +
+    theme(panel.grid.major.y = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks.x = element_blank()) +
+    theme(panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_line(
+              color = "lightgrey", linetype = "dashed"),
+          panel.grid.minor.x = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks.x = element_blank(),
+          text = element_text(size = 10, color = "black"),
+          axis.title = element_text(color = "black", size = 10),
+          axis.text = element_text(color = "black", size = 10),
+          legend.text = element_text(size = 12, color = "black"),
+          legend.title = element_text(size = 12, color = "black"),
+          legend.position = "top",
+          plot.margin = unit(c(0.1, 0.2, 0.1, 0.2), "cm"))
+
+ggarrange(g2, g1, nrow = 1, ncol = 2,
+          labels = c("A", "B"), 
+          common.legend = TRUE, legend = "top")
+
+ggsave("figures/figure2_profit_curve.png",
+       bg = "white",
+       width = 6.5, height = 3, dpi = 500)
+```
+
+### Figure S13
+
+```{r}
+# Format the data
+vals <- smry_all_exps
+nms <- c("B", "Ca", "Co", "D")
+names(vals)[1:4] <- nms
+
+vals <- do.call(rbind, lapply(unique(vals$group), function(fct){
+    v <- vals %>% filter(group == fct) %>% 
+        select(-c("farmable_area", "num_unit", 
+                  "land_usage", "scenario", "change"))
+    ref_vals <- vals %>% filter(weight == 1) %>% select(all_of(c(nms, "group")))
+    ref_vals <- c(ref_vals[1, 1], ref_vals[2, 2], ref_vals[3, 3], ref_vals[4, 4])
+    for (i in 1:4){
+        v[, i] <- v[, i] / ref_vals[i] * 100
+    }
+    
+    v
+}))
+
+# Make figures
+fig_list <- lapply(nms, function(fct){
+    val_to_plot <- vals %>% filter(group == fct) %>% 
+        pivot_longer(nms, names_to = "factor", values_to = "value")
+    ggplot(data = val_to_plot) +
+        geom_line(aes(x = weight, y = value, color = factor)) +
+        xlab("Weight") + ylab("Cost increase (% of best solution)") +
+        scale_color_npg(name = "Decision-making factor") +
+        theme_light() +
+        theme(panel.grid.major.y = element_blank(),
+              panel.border = element_blank(),
+              axis.ticks.x = element_blank()) +
+        theme(panel.grid.major.y = element_blank(),
+              panel.grid.major.x = element_line(
+                  color = "lightgrey", linetype = "dashed"),
+              panel.grid.minor.x = element_blank(),
+              panel.border = element_blank(),
+              axis.ticks.x = element_blank(),
+              text = element_text(size = 10, color = "black"),
+              axis.title = element_text(color = "black", size = 10),
+              axis.text = element_text(color = "black", size = 10),
+              legend.text = element_text(size = 12, color = "black"),
+              legend.title = element_text(size = 12, color = "black"),
+              legend.position = "top",
+              plot.margin = unit(c(0.1, 0.2, 0.1, 0.2), "cm"))
+})
+
+ggarrange(plotlist = fig_list, nrow = 2, ncol = 2,
+          labels = c("A", "B", "C", "D"), 
+          common.legend = TRUE, legend = "top")
+
+ggsave("figures/S13_interaction.png",
+       bg = "white",
+       width = 6.5, height = 6.5, dpi = 500)
+```
+
+### Figure 3
+
+```{r}
 # Summarize the maps
 f_dir <- "results/scenarios/spatial"
 fnames <- list.files(f_dir, full.names = TRUE, pattern = "Y100_USG64.tif$")

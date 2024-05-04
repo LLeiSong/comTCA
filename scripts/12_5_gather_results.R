@@ -15,7 +15,7 @@ library(terra)
 library(stringr)
 
 ## Directories
-data_dir <- "results/scenarios"
+data_dir <- "results/scenarios" # scenarios/profit
 dst_dir <- file.path(data_dir, "summary")
 if(!dir.exists(dst_dir)) dir.create(dst_dir)
 
@@ -61,5 +61,6 @@ smry_all_exps <- do.call(rbind, lapply(land_usages, function(land_usage){
     }))
 }))
 
+# or summary_profit.csv for profit
 fname <- file.path(dst_dir, "summary_scenarios_USGs.csv")
 write.csv(smry_all_exps, fname, row.names = FALSE)

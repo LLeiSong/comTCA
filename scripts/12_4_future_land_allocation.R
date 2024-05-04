@@ -7,6 +7,7 @@
 ##
 ## Copyright (c) Lei Song, 2023
 ## Email: lsong@ucsb.edu
+
 ## Compare scenarios:
 ## yield, cbetas = "1,0,0,0,0"
 ## biodiversity, cbetas = "0,1,0,0,0"
@@ -17,6 +18,9 @@
 ## biodiversity + carbon + connectivity (only costs), cbetas = "0,0.33,0.33,0.33,0"
 ## yield + biodiversity + carbon + cost distance (no connectivity), cbetas = "0.25,0.25,0.25,0,0.25"
 ## yield + biodiversity + carbon + connectivity + cost distance (everything), cbetas = "0.2,0.2,0.2,0.2,0.2"
+
+## Evaluate the effects of weight on reducing cost
+## Y(*), 0% - 100% (20%)
 
 ## Usage
 ## Rscript 12_4_future_land_allocation.R -s 1 -c "0.2,0.2,0.2,0.2,0.2" -o Y100 -l 0.64 -d scenarios
@@ -116,7 +120,7 @@ land_allocate <- function(
         add_min_set_objective() %>%
         add_absolute_targets(targets) %>%
         add_binary_decisions() %>% 
-        add_gurobi_solver(threads = 10, gap = 0, verbose = FALSE)
+        add_gurobi_solver(threads = 8, gap = 0, verbose = FALSE)
     s <- solve(p)
     
     ########################## Start the converge ##########################
@@ -150,7 +154,7 @@ land_allocate <- function(
             add_min_set_objective() %>%
             add_absolute_targets(targets) %>%
             add_binary_decisions() %>% 
-            add_gurobi_solver(threads = 10, gap = 0, verbose = FALSE)
+            add_gurobi_solver(threads = 8, gap = 0, verbose = FALSE)
         s <- solve(p)
     }
     
@@ -207,7 +211,7 @@ option_list <- list(
                               "CASS2, CASS3, CASS4, CASS5].")),
     make_option(c("-l", "--land_usage"), 
                 action = "store", type = 'numeric',
-                help = "The percentage of land usage, [0.65, 0.8, 1.0]."),
+                help = "The percentage of land usage, [0.64, 0.8, 1.0]."),
     make_option(c("-p", "--production_need"), 
                 action = "store", default = 1, type = 'numeric',
                 help = "The production to catch from land expansion."),
@@ -293,3 +297,46 @@ if (production_need > 0){
 } else {
     message("No more land is needed.")
 }
+
+# To test the effects of weights
+# # Set static parameters
+# seed <- 123
+# scenario <- 'Y100'
+# land_usage <- 0.64
+# yield_num <- ifelse(
+#     str_detect(scenario, "Y"), str_extract(scenario, "[0-9]+"), 100)
+# cassava <- ifelse(
+#     str_detect(scenario, "CASS"), str_extract(scenario, "[0-9]+"), 1)
+# 
+# # Make directory for the results
+# dst_dir <- file.path(dst_dir, "profit")
+# if (!dir.exists(dst_dir)) dir.create(dst_dir)
+# 
+# # Loop over different weight values
+# wts <- seq(0.1, 0.9, 0.1)
+# factors <- c("Yield", "Biodiversity", "Carbon", "Connectivity", "Distance")
+# 
+# for (ft in factors[-1]){
+#     for (wt in wts){
+#         # Set weights
+#         cbetas <- rep(0, 5)
+#         cbetas[1] <- 1 - wt
+#         cbetas[which(factors == ft)] <- wt
+#         
+#         # Set the factors
+#         cbetas <- c("Yield" = cbetas[1], "Biodiversity" = cbetas[2], "Carbon" = cbetas[3], 
+#                     "Connectivity" = cbetas[4], "Distance" = cbetas[5])
+#         idx <- which(cbetas != 0)[-1]
+#         exp_name <- paste(
+#             c("Y", sprintf("%s%s", c("Y", "B", "Ca", "Co", "D")[idx], 
+#                            cbetas[idx] * 10)), collapse = "")
+#         message(sprintf("%s, %s, %s", ft, wt, exp_name))
+#         print(cbetas)
+#         
+#         # Run experiments
+#         land_allocate(
+#             atn_yields, farmable_area, weights, costs,
+#             exp_name, cbetas, scenario, land_usage, production_need,
+#             TRUE, seed, dst_dir)
+#     }
+# }

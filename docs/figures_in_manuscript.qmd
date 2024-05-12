@@ -22,6 +22,7 @@ library(tidyverse)
 library(ggsci) # for paper color palette
 library(ggnewscale) # help to have multiple same scales
 library(ggtext) # for rich text
+library(ggsflabel)
 sf_use_s2(FALSE)
 
 # Paths
@@ -156,24 +157,25 @@ The figure 1 is drawn in drawio.
 
 ```{r}
 f_dir <- "results/scenarios/summary"
-items <- c("Y", "I", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
+# items <- c("Y", "I", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
+items <- c("Y", "I", "B", "Ca", "Co", "D", "YBCaCoD")
 
 # Load dataset
-vals_cmpr <- read.csv(file.path(f_dir, "summary_scenarios_USG64_best.csv")) %>% 
+vals_cmpr <- read.csv(file.path(f_dir, "summary_scenarios_USGs.csv")) %>% 
+    filter(land_usage == 0.64) %>% 
+    filter(change == "Y100") %>% 
     filter(scenario %in% items) %>% 
     mutate(scenario = factor(
         scenario, levels = items, labels = items)) %>% 
-    filter(change == "Y100") %>% 
     mutate(farmable_area_intense = farmable_area / num_unit) %>% 
-    select(-c(land_usage, change, num_unit, num_unit, iter_n,
-              farmable_area_cultv, farmable_area_cultv))
+    select(-c(land_usage, change, num_unit, weight))
 names(vals_cmpr) <- c("B", "Ca", "Co", "D", "Y", "scenario", "I")
 
 # Figure
 fig_list <- lapply(c("Y", "I", "B", "Ca", "Co", "D"), function(item){
     # Clean data
     # item_order <- c(item, setdiff(items, item))
-    item_order <- items
+    item_order <- rev(items)
     vals <- vals_cmpr %>% 
         select(all_of(c(item, "scenario"))) %>% 
         mutate(scenario  = factor(
@@ -184,18 +186,18 @@ fig_list <- lapply(c("Y", "I", "B", "Ca", "Co", "D"), function(item){
         mutate(group = ifelse(
             scenario == item_mod, "Optimal", 
             ifelse(scenario %in% setdiff(c("B", "Ca", "Co", "D", "Y"), item_mod), 
-                   "Single factor", "Combined factors"))) %>% 
+                   "Single factor", "Hybrid"))) %>% 
         mutate(group = factor(
-            group, levels = c("Optimal", "Single factor", "Combined factors"),
-            labels = c("Optimal", "Single factor", "Combined factors")))
+            group, levels = c("Single factor", "Optimal", "Hybrid"),
+            labels = c("Single factor (", "Optimal)", "Hybrid")))
     
     # Separate different conditions
     if (str_detect(item, "Y")){
         vals$value <- vals$value / 1e6
-        xlab_nm <- expression(paste("New cropland area (ha * ", 10^6, ")     "))
-    }else if (str_detect(item, "I")){
+        xlab_nm <- expression(paste("New cropland area (ha * ", 10^6, ")        "))
+    } else if (str_detect(item, "I")){
         vals$value <- vals$value
-        xlab_nm <- "New cropland area / No. of unit (ha)               "
+        xlab_nm <- "New cropland area / No. of unit (ha)                  "
     } else if (str_detect(item, "B")) {
         vals$value <- vals$value / 1e6
         xlab_nm <- expression(paste("Biodiversity loss (", 10^6, ")"))
@@ -206,16 +208,19 @@ fig_list <- lapply(c("Y", "I", "B", "Ca", "Co", "D"), function(item){
         vals$value <- vals$value / 1e6
         xlab_nm <- expression(paste("Connectivity loss (", 10^5, ")"))
     } else if (str_detect(item, "D")){
-        vals$value <- vals$value / 60 / 1e7
-        xlab_nm <- expression(paste("Travel time increase (hours * ", 10^7, ")            "))}
-    
+        vals$value <- vals$value / 60 / 1e6
+        xlab_nm <- expression(paste("Travel time (hours * ", 10^6, ")"))}
+
     # Make figure
     ggplot(data = vals) + 
         geom_segment(aes(
             y = scenario, yend = scenario, 
             x = 0, xend = value, color = group), linewidth = 0.8) +
         geom_point(aes(y = scenario, x = value, color = group), size = 2) +
-        scale_color_npg(name = "Planning type") +
+        scale_color_manual(
+            name = "Solution type", 
+            values = c(pal_npg("nrc")(3)[2], pal_npg("nrc")(1), 
+                       pal_npg("nrc")(3)[3])) +
         theme_light() +
         theme(panel.grid.major.y = element_blank(),
               panel.border = element_blank(),
@@ -228,71 +233,85 @@ fig_list <- lapply(c("Y", "I", "B", "Ca", "Co", "D"), function(item){
               panel.grid.minor.x = element_blank(),
               panel.border = element_blank(),
               axis.ticks.x = element_blank(),
-              text = element_text(size = 10, color = "black"),
-              axis.title = element_text(color = "black", size = 10),
-              axis.text = element_text(color = "black", size = 10),
-              legend.text = element_text(size = 12, color = "black"),
-              legend.title = element_text(size = 12, color = "black"),
+              text = element_text(size = 10.5, color = "black"),
+              axis.title = element_text(color = "black", size = 10.5),
+              axis.text = element_text(color = "black", size = 10.5),
+              legend.text = element_text(size = 11, color = "black"),
+              legend.title = element_text(size = 11, color = "black"),
               legend.position = "top",
               plot.margin = unit(c(0.1, 0.2, 0.1, 0.2), "cm"))
 })
 
 ggarrange(plotlist = fig_list, nrow = 2, ncol = 3,
-          labels = c("A", "B", "C", "D", "E", "F"), vjust = 5,
+          labels = c("A", "B", "C", "D", "E", "F"), 
           common.legend = TRUE, legend = "top")
 
 ggsave("figures/figure2_factor_compare.png",
        bg = "white",
-       width = 7.5, height = 4.5, dpi = 500)
+       width = 7.5, height = 3.5, dpi = 500)
+
+# Calculate some numbers for results
+vals_Y <- vals_cmpr %>% filter(scenario == "Y") %>% select(-c(scenario, I))
+vals_balanced <- vals_cmpr %>% filter(scenario == "YBCaCoD") %>% 
+    select(-c(scenario, I))
+
+## Increase in land need - abstract
+round((vals_balanced - vals_Y) / vals_Y * 100, 1)
 ```
 
 ### Figure S12
 
 ```{r}
-f_dir <- "results/scenarios/summary"
-items <- c("Y", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
-simu_mean <- do.call(rbind, lapply(items, function(item){
-    read.csv(sprintf("%s/%s_Y100_USG64_simu_best.csv", f_dir, item)) %>% 
-        mutate(mod = item)
-})) %>% mutate(mod = factor(mod, levels = items, labels = items))
-
+# Starting point
 prod_gain_intense <- read.csv(
     file.path("results/intensification", "prod_gain_CASS1_Y100_USG64.csv"))
 pgi_mean <- mean(prod_gain_intense$Production_gain) / 1e6
 pgi_sd <- sd(prod_gain_intense$Production_gain) / 1e6
 
-fig_list <- lapply(names(simu_mean)[2:6], function(ele){
-    vals <- simu_mean %>% select(all_of(c("farmable_ratio", "mod", ele)))
+# Read trajectories
+f_dir <- "results/trajectories"
+items <- c("Y", "B", "Ca", "Co", "D", "YBCaCoD")
+simus <- do.call(rbind, lapply(items, function(item){
+    read.csv(sprintf("%s/%s_trajectory.csv", f_dir, item)) %>% 
+        select(c('production', 'Biodiversity', "Carbon", "Connectivity", 
+                 "Distance", "farmable_area")) %>% 
+        rbind(data.frame(
+            production = 0, Biodiversity = 0, Carbon = 0,
+            Connectivity = 0, Distance = 0, farmable_area = 0), .) %>% 
+        mutate(mod = item)
+})) %>% mutate(mod = factor(mod, levels = items, labels = items))
+
+fig_list <- lapply(names(simus)[1:5], function(ele){
+    vals <- simus %>% select(all_of(c("farmable_area", "mod", ele)))
     names(vals)[3] <- "value"
-    vals$farmable_ratio <- vals$farmable_ratio / 1e6
+    vals$farmable_area <- vals$farmable_area / 1e6
     
     # Separate different conditions
-    if (str_detect(ele, "Production")){
-        vals$value <- vals$value / 1e6 + pgi_mean
-        ylab_nm <- expression(paste("Production gain (tons * ", 10^6, ")"))
+    if (str_detect(ele, "production")){
+        vals$value <- vals$value / 1e7 + pgi_mean
+        ylab_nm <- expression(paste("Production gain (tons * ", 10^7, ")   "))
     } else if (str_detect(ele, "Biodiversity")) {
-        vals$value <- vals$value / 1e5
-        ylab_nm <- expression(paste("Biodiversity loss (", 10^5, ")"))
+        vals$value <- vals$value / 1e6
+        ylab_nm <- expression(paste("Biodiversity loss (", 10^6, ")"))
     } else if (str_detect(ele, "Carbon")){
-        vals$value <- vals$value / 1e7
-        ylab_nm <- expression(paste("Carbon loss (tons * ", 10^7, ")"))
+        vals$value <- vals$value / 1e6
+        ylab_nm <- expression(paste("Carbon loss (tons * ", 10^6, ")"))
     } else if (str_detect(ele, "Connectivity")){
-        vals$value <- vals$value / 1e5
-        ylab_nm <- expression(paste("Connectivity loss (", 10^5, ")"))
+        vals$value <- vals$value / 1e4
+        ylab_nm <- expression(paste("Connectivity loss (", 10^4, ")"))
     } else {
         vals$value <- vals$value / 60 / 1e6
-        ylab_nm <- expression(paste("Travel time increase (hours * ", 10^6, ")     "))
+        ylab_nm <- expression(paste("Travel time (hours * ", 10^6, ")     "))
     }
     
-    p <- ggplot(vals, aes(x = farmable_ratio, y = value)) + 
-        geom_line(aes(color = mod)) + 
-        scale_color_npg(name = "Planning type")
+    p <- ggplot(vals, aes(x = farmable_area, y = value)) + 
+        geom_line(aes(color = mod, linetype = mod)) + 
+        scale_color_npg(name = "Solution type") +
+        scale_linetype_manual(
+            name = "Solution type", values = c(rep("solid", 5), rep("dashed", 4)))
     
-    if (str_detect(ele, "Production")){
-        p <- p + geom_point(aes(x = min(farmable_ratio), y = pgi_mean), size = 0.8) +
-            geom_errorbar(aes(x = min(farmable_ratio), y = pgi_mean,
-                              ymin = pgi_mean - pgi_sd, ymax = pgi_mean + pgi_sd), 
-                          width = .2, position = position_dodge(0.05)) + 
+    if (str_detect(ele, "production")){
+        p <- p + geom_point(aes(x = min(farmable_area), y = pgi_mean), size = 0.8) +
             annotate(geom = "text", x = 0.25, hjust = 0, size = 2.1,
                      y = pgi_mean, label = "Production gain from existing cropland")
     }
@@ -316,18 +335,26 @@ ggarrange(fig_list[[1]], fig_list[[2]], fig_list[[3]],
 
 ggsave("figures/S12_trajectories_scenarios.png",
        bg = "white",
-       width = 7.4, height = 5.5, dpi = 500)
+       width = 7.5, height = 5, dpi = 500)
 ```
 
 ### Figure 3
 
 ```{r}
 # Summarize the maps
-fnames <- list.files(f_dir, full.names = TRUE, pattern = "Y100_USG64_best.tif")
+f_dir <- "results/scenarios/spatial"
+fnames <- list.files(f_dir, full.names = TRUE, pattern = "Y100_USG64.tif$")
+fnames <- fnames[c(1,3:7)]
 maps <- lapply(fnames, function(fname){
     rst <- rast(fname)
     rst[is.na(rst)] <- 0
-    rst
+    lyrs <- do.call(c, lapply(0:5, function(x) {
+        if (x == 0){
+            rst > 0
+        } else rst == x
+    }))
+    names(lyrs) <- c("farmland", "Maize", "Paddy", "Sorghum", "Cassava", "Beans")
+    lyrs
 })
 
 layers <- do.call(c, lapply(names(maps[[1]]), function(lyr){
@@ -361,7 +388,7 @@ g1 <- ggplot() +
             fill = "#E5F5E0", linewidth = 0) +
     geom_spatraster(data = layers$farmland, na.rm = TRUE) +
     scale_fill_continuous_sequential(
-        name = "Agreement level (1 - 9)", breaks = c(1, 3, 5, 7, 9),
+        name = "Agreement level (1 - 6)", breaks = c(1, 3, 5),
         palette = "Plasma", na.value = NA,
         guide = guide_colourbar(
             title.position = "top", title.hjust = 0.5)) +
@@ -369,21 +396,21 @@ g1 <- ggplot() +
             fill = "transparent", linewidth = 0.3) +
     geom_sf_text(data = areas[2, ], fontface='bold',
                  aes(label = "Lake"), nudge_y = 0.8, nudge_x = 0.5,
-                 colour = "black", size = 3) +
+                 colour = "black", size = 2.8) +
     geom_sf_text(data = areas[2, ], fontface='bold',
                  aes(label = "Victoria"), nudge_y = 0.5, nudge_x = 0.5,
-                 colour = "black", size = 3) +
+                 colour = "black", size = 2.8) +
     geom_sf_text_repel(data = areas[3, ], fontface='bold',
-            aes(label = name), colour = "black", size = 3, 
+            aes(label = name), colour = "black", size = 2.8, 
             nudge_y = 1.2, nudge_x = 0.3, force = 100) +
     geom_sf_text_repel(data = areas[1, ], fontface='bold',
-            aes(label = name), colour = "black", size = 3, 
+            aes(label = name), colour = "black", size = 2.8, 
             nudge_y = 0.9, nudge_x = -0.2, force = 100) +
     geom_sf_text_repel(data = areas[4, ], fontface='bold',
-            aes(label = name), colour = "black", size = 3, 
+            aes(label = name), colour = "black", size = 2.8, 
             nudge_y = 1.2, nudge_x = -1.4, force = 100) +
     geom_sf_text_repel(data = areas[5, ], fontface='bold',
-            aes(label = name), colour = "black", size = 3, 
+            aes(label = name), colour = "black", size = 2.8, 
             nudge_y = -1.5, nudge_x = 0, force = 100) +
     geom_sf(data = bry, color = "black", 
             fill = "transparent", linewidth = 0.6) +
@@ -399,6 +426,7 @@ g1 <- ggplot() +
           legend.box = "vertical")
 
 # Pairwise agreement
+items <- c("Y", "B", "Ca", "Co", "D", "YBCaCoD")
 nms <- sapply(str_split(basename(fnames), "_"), function(x) x[[1]][1])
 names(maps) <- nms
 pairwise_agree <- do.call(rbind, lapply(1:(length(items) - 1), function(n){
@@ -416,7 +444,6 @@ pairwise_agree <- do.call(rbind, lapply(1:(length(items) - 1), function(n){
 })); row.names(pairwise_agree) <- NULL
 
 ## Figure
-items <- c("Y", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
 vals <- pairwise_agree %>% filter(crop == "Overall") %>%
     mutate(from = factor(from, levels = items, labels = items),
            to = factor(to, levels = items, labels = items))
@@ -424,9 +451,10 @@ vals <- pairwise_agree %>% filter(crop == "Overall") %>%
 g2 <- ggplot(vals, aes(x = from, y = to, fill = agreement)) +
     geom_tile(color = "white") + coord_equal() + labs(x = "", y = "") +
     geom_text(aes(from, to, label = round(agreement, 0)), 
-              color = "white", size = 3) +
-    scale_fill_continuous_sequential(limits = c(0, 80),
-                                     name = expression("IoU (" %*% "100)"), palette = "Plasma") +
+              color = "white", size = 4, fontface = "bold") +
+    scale_fill_continuous_sequential(
+        limits = c(0, 75), name = expression("IoU (" %*% "100)"), 
+        palette = "Heat") +
     theme_minimal() +
     theme(axis.title.x = element_blank(),
           axis.title.y = element_blank(),
@@ -434,26 +462,62 @@ g2 <- ggplot(vals, aes(x = from, y = to, fill = agreement)) +
           panel.border = element_blank(),
           panel.background = element_blank(),
           axis.ticks = element_blank(),
-          legend.justification = c(1, 0),
-          legend.position = c(1.0, 0.1),
+          # legend.justification = c(1, 0),
+          legend.position = 'bottom',
           legend.direction = "horizontal",
           legend.spacing.y = unit(0.1, 'cm'),
           legend.margin = margin(rep(0, 4)), 
           text = element_text(size = 10, color = "black"),
           legend.text = element_text(size = 10),
           legend.title = element_text(size = 10),
-          axis.text.x = element_text(angle = 45, vjust = 1, 
+          axis.text.x = element_text(color= "black", vjust = 1, 
                                      size = 10, hjust = 1),
-          axis.text.y = element_text(size = 10))+
+          axis.text.y = element_text(size = 10, color = "black"))+
     guides(fill = guide_colorbar(
         barwidth = 7, barheight = 0.8,
         title.position = "top", title.hjust = 0.5))
 
-ggarrange(g1, g2, nrow = 1, ncol = 2, labels = c("A", "B"))
+ggarrange(g1, g2, nrow = 1, ncol = 2, labels = c("A", "B"), widths = c(1.2, 1))
 
 ggsave("figures/figure3_newland_agreement.png",
        bg = "white",
-       width = 7, height = 4.2, dpi = 500)
+       width = 5.5, height = 3.8, dpi = 500)
+
+# Calculate some numbers
+pairwise_agree <- do.call(rbind, lapply(1:length(items), function(n){
+    map1 <- maps[[items[n]]]
+    do.call(rbind, lapply(1:length(items), function(m){
+        map2 <- maps[[items[m]]]
+        ovp <- map1 + map2
+        ratios <- global(ovp == 2, "sum", na.rm = TRUE) / 
+            global(ovp > 0, "sum", na.rm = TRUE) * 100
+        ratios %>% 
+            mutate(crop = c("Overall", str_to_title(row.names(.)[-1])),
+                   agreement = sum, from = items[n], to = items[m]) %>% 
+            select(from, to, crop, agreement)
+    }))
+})); row.names(pairwise_agree) <- NULL
+
+## Figure
+### Remove item to item value
+pairwise_agree <- pairwise_agree %>% filter(agreement != 100)
+
+vals <- pairwise_agree %>% filter(crop == "Overall") %>%
+    mutate(from = factor(from, levels = items, labels = items),
+           to = factor(to, levels = items, labels = items))
+vals_sg <- vals %>% group_by(from) %>% 
+    summarise(mean = mean(agreement), sd = sd(agreement))
+vals_sg %>% arrange(mean)
+vals_sg %>% arrange(sd)
+
+pairwise_agree %>% filter(crop != "Overall") %>% 
+    group_by(crop) %>% 
+    summarise(mean = mean(agreement), sd = sd(agreement)) %>% 
+    arrange(mean)
+
+vals %>% filter(from == "Co") %>% 
+    mutate(group = ifelse(str_detect(to, "Co"), "has", "not")) %>% 
+    group_by(group) %>% summarise(mean = mean(agreement))
 ```
 
 ### Figure S13
@@ -465,7 +529,7 @@ fig_list <- lapply(names(layers)[-1], function(crp){
                 fill = "#E5F5E0", linewidth = 0) +
         geom_spatraster(data = layers[crp], na.rm = TRUE) +
         scale_fill_continuous_sequential(
-            name = "Agreement level\n(1 - 9)", breaks = c(1, 3, 5, 7, 9),
+            name = "Agreement level\n(1 - 6)", breaks = c(1, 3, 5, 7, 9),
             palette = "Plasma", na.value = NA,
             guide = guide_colourbar(title.position = "top", vjust = 0.5)) +
         geom_sf(data = bry, color = "black", 
@@ -496,7 +560,7 @@ ggsave("figures/S13_agreement_crops.png",
 ### Figure S14
 
 ```{r}
-items <- c("Y", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
+items <- c("Y", "B", "Ca", "Co", "D", "YBCaCoD")
 fig_list <- lapply(c("Maize", "Paddy", "Sorghum", "Cassava", "Beans"), 
                    function(crp){
     vals <- pairwise_agree %>% filter(crop == crp) %>%
@@ -506,9 +570,9 @@ fig_list <- lapply(c("Maize", "Paddy", "Sorghum", "Cassava", "Beans"),
     ggplot(vals, aes(x = from, y = to, fill = agreement)) +
         geom_tile(color = "white") + coord_equal() + labs(x = "", y = "") +
         geom_text(aes(from, to, label = round(agreement, 0)), 
-                  color = "white", size = 3) +
-        scale_fill_continuous_sequential(limits = c(0, 87),
-            name = expression("IoU (" %*% "100)"), palette = "Plasma") +
+                  color = "white", size = 3, fontface = "bold") +
+        scale_fill_continuous_sequential(limits = c(0, 82),
+            name = expression("IoU (" %*% "100)"), palette = "Heat") +
         theme_minimal() +
         theme(axis.title.x = element_blank(),
               axis.title.y = element_blank(),
@@ -542,6 +606,191 @@ ggsave("figures/S14_pairwise_crops.png",
 
 ### Figure 4
 
+```{r}
+# Read files
+smry_all_exps <- read.csv(
+    file.path("results/profit/summary", "summary_profit.csv"))
+smry_others <- read.csv(
+    file.path("results/scenarios/summary", "summary_scenarios_USGs.csv")) %>% 
+    filter(change == "Y100") %>% 
+    filter(land_usage == 0.64)
+smry_sup <- smry_others %>% filter(scenario == "Y") %>% 
+    cbind(., rep(row.names(.), each = 4)) %>% 
+    select(names(smry_others)) %>% 
+    mutate(scenario = c('YB0', "YCa0", 'YCo0', "YD0")) %>% 
+    rbind(smry_others %>% filter(scenario %in% c("B", "Ca", "Co", "D")) %>% 
+              mutate(scenario = c("YB10", "YCa10", "YCo10", "YD10")))
+    
+smry_all_exps <- rbind(smry_all_exps, smry_sup)
+smry_all_exps <- smry_all_exps %>% 
+    mutate(group = str_extract(scenario, "[A-Z|a-z]+")) %>% 
+    mutate(group = gsub("Y", "", group))
+smry_all_exps <- smry_all_exps %>% 
+    mutate(weight = as.numeric(str_extract(scenario, "[0-9]+")) / 10)
+
+# Format the data
+vals <- smry_all_exps
+hybrid <- smry_others %>% 
+    filter(scenario == "YBCaCoD") %>% mutate(group = "hybrid") %>% 
+    mutate(weight = 0.2)
+vals <- rbind(vals, hybrid)
+names(vals)[1:4] <- c("B", "Ca", "Co", "D")
+
+vals <- do.call(rbind, lapply(unique(vals$group)[-5], function(fct){
+    v <- vals %>% filter(group == fct) %>% 
+        rbind(vals %>% filter(group == "hybrid")) %>% 
+        select(all_of(c(fct, "farmable_area", "weight", "group"))) %>% 
+        rename(value = fct)
+    v %>% 
+        mutate(value = value / 
+                   (v %>% filter(weight == 0) %>% pull(value)) * 100) %>% 
+        mutate(farmable_area = farmable_area / 
+                   (v %>% filter(weight == 0) %>% pull(farmable_area)) * 100) %>% 
+        mutate(type = ifelse(group == fct, "line", "point")) %>% 
+        mutate(group = fct)
+}))
+
+vals <- vals %>% 
+    mutate(group = factor(group, 
+                          levels = c("B", "Ca", "Co", "D"),
+                          labels = c("Biodiversity", "Carbon", 
+                                     "Connectivity", 
+                                     "Travel time"))) %>% 
+    mutate(weight = weight * 100)
+
+# Make figures
+g1 <- ggplot() +
+    geom_line(data = vals %>% filter(type == "line"), 
+              aes(x = weight, y = farmable_area, color = group),
+              linewidth = 0.7) +
+    geom_vline(xintercept = 20, linetype = "dashed") +
+    geom_point(data = vals %>% filter(type == "point") %>% 
+                   mutate(size = c('1.6', '1.4', '1.2', '1.0')), 
+              aes(x = weight, y = farmable_area, color = group, size = size)) +
+    scale_size_manual(values = c(0.6, 1.0, 1.4, 1.8), guide = "none") + 
+    xlab("Weight (%)") + ylab("New cropland area (% of solution Y)       ") +
+    scale_color_npg(name = "Decision-making factor") +
+    theme_light() +
+    theme(panel.grid.major.y = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks.x = element_blank()) +
+    theme(panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_line(
+              color = "lightgrey", linetype = "dashed"),
+          panel.grid.minor.x = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks.x = element_blank(),
+          text = element_text(size = 10, color = "black"),
+          axis.title = element_text(color = "black", size = 10),
+          axis.text = element_text(color = "black", size = 10),
+          legend.text = element_text(size = 10, color = "black"),
+          legend.title = element_text(size = 10, color = "black"),
+          legend.position = "top",
+          plot.margin = unit(c(0.1, 0.2, 0.1, 0.2), "cm"))
+    
+g2 <- ggplot() +
+    geom_line(data = vals %>% filter(type == "line"), 
+              aes(x = weight, y = value, color = group),
+              linewidth = 0.7) +
+    geom_vline(xintercept = 20, linetype = "dashed") +
+    geom_point(data = vals %>% filter(type == "point"), 
+              aes(x = weight, y = value, color = group)) +
+    xlab("Weight (%)") + ylab("Cost (% of solution Y)") +
+    scale_color_npg(name = "Decision-making factor") +
+    theme_light() +
+    theme(panel.grid.major.y = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks.x = element_blank()) +
+    theme(panel.grid.major.y = element_blank(),
+          panel.grid.major.x = element_line(
+              color = "lightgrey", linetype = "dashed"),
+          panel.grid.minor.x = element_blank(),
+          panel.border = element_blank(),
+          axis.ticks.x = element_blank(),
+          text = element_text(size = 10, color = "black"),
+          axis.title = element_text(color = "black", size = 10),
+          axis.text = element_text(color = "black", size = 10),
+          legend.text = element_text(size = 10, color = "black"),
+          legend.title = element_text(size = 10, color = "black"),
+          legend.position = "top",
+          plot.margin = unit(c(0.1, 0.2, 0.1, 0.2), "cm"))
+
+ggarrange(g2, g1, nrow = 1, ncol = 2,
+          labels = c("A", "B"), 
+          common.legend = TRUE, legend = "top")
+
+ggsave("figures/figure4_profit_curve.png",
+       bg = "white",
+       width = 6.5, height = 3.2, dpi = 500)
+```
+
+### Figure S15
+
+```{r}
+# Format the data
+vals <- smry_all_exps
+nms <- c("B", "Ca", "Co", "D")
+names(vals)[1:4] <- nms
+
+vals <- do.call(rbind, lapply(unique(vals$group), function(fct){
+    v <- vals %>% filter(group == fct) %>% 
+        select(-c("farmable_area", "num_unit", 
+                  "land_usage", "scenario", "change"))
+    ref_vals <- vals %>% filter(weight == 1) %>% select(all_of(c(nms, "group")))
+    ref_vals <- c(ref_vals[1, 1], ref_vals[2, 2], ref_vals[3, 3], ref_vals[4, 4])
+    for (i in 1:4){
+        v[, i] <- v[, i] / ref_vals[i] * 100
+    }
+    
+    v
+})) %>% mutate(weight = weight * 100)
+
+# Make figures
+fig_list <- lapply(nms, function(fct){
+    val_to_plot <- vals %>% filter(group == fct) %>% 
+        pivot_longer(nms, names_to = "factor", values_to = "value")
+    
+    val_to_plot <- val_to_plot %>% 
+        mutate(factor = factor(factor, 
+                              levels = c("B", "Ca", "Co", "D"),
+                              labels = c("Biodiversity", "Carbon", 
+                                         "Connectivity", 
+                                         "Travel time")))
+    ggplot(data = val_to_plot) +
+        geom_line(aes(x = weight, y = value, color = factor),
+                  linewidth = 0.8) +
+        xlab("Weight (%)") + ylab("Cost (% of optimal solution)") +
+        scale_color_npg(name = "Decision-making factor") +
+        theme_light() +
+        theme(panel.grid.major.y = element_blank(),
+              panel.border = element_blank(),
+              axis.ticks.x = element_blank()) +
+        theme(panel.grid.major.y = element_blank(),
+              panel.grid.major.x = element_line(
+                  color = "lightgrey", linetype = "dashed"),
+              panel.grid.minor.x = element_blank(),
+              panel.border = element_blank(),
+              axis.ticks.x = element_blank(),
+              text = element_text(size = 10, color = "black"),
+              axis.title = element_text(color = "black", size = 10),
+              axis.text = element_text(color = "black", size = 10),
+              legend.text = element_text(size = 10, color = "black"),
+              legend.title = element_text(size = 10, color = "black"),
+              legend.position = "top",
+              plot.margin = unit(c(0.1, 0.2, 0.1, 0.2), "cm"))
+})
+
+ggarrange(plotlist = fig_list, nrow = 2, ncol = 2,
+          labels = c("A", "B", "C", "D"), 
+          common.legend = TRUE, legend = "top")
+
+ggsave("figures/S15_interaction.png",
+       bg = "white",
+       width = 6.5, height = 6.5, dpi = 500)
+```
+
+### Figure 5
+
 To show the significance of productivity growth on existing cropland.
 
 ```{r}
@@ -572,8 +821,8 @@ g1 <- ggplot(data = vals %>% filter(yield == 100),
                   size = 2, fill = NA, label.color = NA) + 
     annotate(geom = "text", x = 2.8, size = 2.5,
              y = 12002439/1e6, label = "Double the current production") +
-    scale_fill_npg(name = "Land usage (%)") + 
-    scale_color_npg(name = "Land usage (%)") + 
+    scale_fill_npg(name = "Cropland usage rate (%)") + 
+    scale_color_npg(name = "Cropland usage rate (%)") + 
     xlab("Increase in cassava planted area (#fold)") +
     ylab(expression(paste("Production growth (", 10^6, " tons)"))) +
     theme_classic()+
@@ -599,8 +848,8 @@ g2 <- ggplot(data = vals %>% filter(cassava == 1) %>% filter(yield < 150),
                   size = 2, fill = NA, label.color = NA) + 
     annotate(geom = "text", x = 120, size = 2.5,
              y = 12002439/1e6, label = "Double the current production") +
-    scale_fill_npg(name = "Land usage (%)") + 
-    scale_color_npg(name = "Land usage (%)") + 
+    scale_fill_npg(name = "Cropland usage rate (%)") + 
+    scale_color_npg(name = "Cropland usage rate (%)") + 
     xlab("Increase in attainable yield (%)") +
     ylab(expression(paste("Production growth (", 10^6, " tons)"))) +
     theme_classic()+
@@ -620,27 +869,30 @@ ggarrange(g1, g2, nrow = 1, ncol = 2,
           labels = c("A", "B"), legend = "top",
           common.legend = TRUE)
 
-ggsave("figures/figure4_prod_growth.png",
+ggsave("figures/figure5_prod_growth.png",
        bg = "white",
        width = 7, height = 3, dpi = 500)
 ```
 
-### Figure 5
+### Figure 6
 
 Compare the hybrid mode for different scenarios: baseline (Y100, CASS1), yield gap close further (Y140), and growing more high-yield crop (CASS3).
 
 ```{r}
 # Summarize the maps
 fnames <- list.files(
-    "results/scenarios/summary", 
-    full.names = TRUE, pattern = "^YBCaCoD.+.tif")
-fnames <- c(fnames, list.files(
-    "results/USG80/summary", 
-    full.names = TRUE, pattern = "^YBCaCoD.+.tif"))
+    "results/scenarios/spatial", 
+    full.names = TRUE, pattern = "^YBCaCoD.+.tif$")
 maps <- lapply(fnames, function(fname){
     rst <- rast(fname)
     rst[is.na(rst)] <- 0
-    rst
+    lyrs <- do.call(c, lapply(0:5, function(x) {
+        if (x == 0){
+            rst > 0
+        } else rst == x
+    }))
+    names(lyrs) <- c("farmland", "Maize", "Paddy", "Sorghum", "Cassava", "Beans")
+    lyrs
 })
 
 # Make the figure
@@ -749,58 +1001,69 @@ dat <- data.frame(
                    "Common beans", "Common beans2")))
 dat2 <- data.frame(x = 1:2, y = 1:2, z = c("64", "80")) %>% 
     mutate(z = factor(z, levels = c("64", "80"), labels = c("64", "80")))
-legend <-  ggplot() + 
+
+legend <- ggplot() + 
+    geom_raster(data = dat2, aes(x = x, y = y, fill = z)) +
+    scale_fill_manual('Land usage rate', 
+                      values = c('white', 'white'), 
+                      labels = c("", ""),
+                      guide = guide_legend(
+                          title.position = "top", 
+                          title.hjust = -1, title.vjust = -13, 
+                          direction = "horizontal", 
+                          order = 1,
+                          override.aes = list(size=0))) +
+    new_scale_fill() +
+    geom_raster(data = dat3, aes(x = x, y = y, fill = z)) +
+    scale_fill_manual('',
+                      values = c("lightgrey", "black"), 
+                      labels = c("64%", "80%"),
+                      guide = guide_legend(
+                          title.position = "top", 
+                          direction = "horizontal", 
+                          label.position = "left",
+                          label.hjust = 1, nrow = 2,
+                          order = 2)) +
+    new_scale_fill() +
     geom_raster(data = dat,  aes(x = x, y = y, fill = rst)) +
     scale_fill_manual('Suggested crop',
                       values = crop_cols,
                       labels = c("Maize", "", "Paddy rice", "", "Sorghum", "", 
                                  "Cassava", "", "Common beans", ""),
-                      guide = guide_legend(title.position = "top", 
-                                           title.hjust = 0.5)) +
-    new_scale_fill() +
-    geom_raster(data = dat2, aes(x = x, y = y, fill = z)) +
-    scale_fill_manual('Land usage (%)',
-                      values = c("grey", "Black"), labels = c("64", "80"),
-    )+
+                      guide = guide_legend(
+                          title.position = "top", 
+                          title.hjust = 0.5, direction = "horizontal",
+                          order = 3)) +
     theme(legend.text = element_text(size = 10),
-          legend.position = "top", legend.direction = "horizontal")+
-    guides(fill = guide_legend(title.position = "top", title.hjust = 0.5))
+          legend.position = "top", 
+          legend.box = "horizontal")
 legend_lc <- get_legend(legend)
 
 g1 <- ggarrange(legend_lc, ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
                                      labels = c("A", "B", "C")), 
-                nrow = 2, ncol = 1, heights = c(3, 10))
+                nrow = 2, ncol = 1, heights = c(3.2, 10))
 
 # New area and ecological costs change
-vals_64 <- read.csv(
+vals <- read.csv(
     file.path("results/scenarios/summary", 
-              "summary_scenarios_USG64_best.csv")) %>% 
+              "summary_scenarios_USGs.csv")) %>% 
     filter(scenario == "YBCaCoD") %>% 
-    select(-c(scenario, num_unit, iter_n, farmable_area_cultv))
-names(vals_64) <- c("B", "Ca", "Co", "D", "Y", "USG", "Practice")
+    select(-c(scenario, num_unit, weight))
+names(vals) <- c("B", "Ca", "Co", "D", "Y", "USG", "Practice")
 
-vals_80 <- read.csv(
-    file.path("results/USG80/summary", 
-              "summary_scenarios_USG80_best.csv")) %>% 
-    filter(scenario == "YBCaCoD") %>% 
-    select(-c(scenario, num_unit, iter_n, farmable_area_cultv))
-names(vals_80) <- c("B", "Ca", "Co", "D", "Y", "USG", "Practice")
-
-vals <- vals_64 %>% pivot_longer(
-    c("B", "Ca", "Co", "D", "Y"), names_to = "Element") %>% 
-    rbind(vals_80 %>% pivot_longer(
-        c("B", "Ca", "Co", "D", "Y"), names_to = "Element"))
+vals <- vals %>% pivot_longer(
+    c("B", "Ca", "Co", "D", "Y"), names_to = "Element")
 vals <- vals %>% group_by(Element) %>% 
     reframe(USG = USG, Practice = Practice,
             value = value / max(value) * 100) %>% 
-    mutate(USG = factor(USG, labels = c("64", "80"), levels = c(64, 80))) %>% 
+    mutate(USG = factor(USG, labels = c("64%", "80%"), levels = c(0.64, 0.8))) %>% 
     mutate(Practice = factor(Practice, labels = c("A", "B", "C"),
                              levels = c("Y100", "CASS3", "Y140"))) %>% 
     mutate(Element = factor(
         Element, levels = c("Y", "B", "Ca", "Co", "D"),
         labels = c("New cropland area", "Biodiveristy loss", "Carbon loss",
-                   "Connectivity loss", "Travel time increase")))
-vals <- vals %>% mutate(group = ifelse(USG == 64 & Practice == "A", "B", "P"))
+                   "Connectivity loss", "Travel time")))
+vals <- vals %>% mutate(group = ifelse(USG == "64%" & Practice == "A", "B", "P"))
 
 g2 <- ggplot(data = vals) + 
     geom_linerange(aes(
@@ -813,7 +1076,7 @@ g2 <- ggplot(data = vals) +
               size = 3, color = "black", fontface = "bold",
               position = position_dodge2(width = 0.7)) + 
     scale_color_manual(values = c("#d73027", "black")) +
-    xlab("") + ylab("Percentage") + labs(linetype = "Land usage (%)") +
+    xlab("") + ylab("Percentage") + labs(linetype = "Land usage rate") +
     facet_grid(~Element) +
     theme_light() +
     theme(panel.grid.major.x = element_blank(),
@@ -836,79 +1099,9 @@ g2 <- ggplot(data = vals) +
 
 ggarrange(g1, g2, nrow = 2, ncol = 1, heights = c(6, 5))
 
-ggsave("figures/figure5_compare.png",
+ggsave("figures/figure6_compare.png",
        bg = "white",
        width = 7.4, height = 5.6, dpi = 500)
-```
-
-### Figure 6
-
-```{r}
-fnames <- list.files("results/intensification", full.names = TRUE)
-vals <- do.call(rbind, lapply(fnames, function(fname){
-    params <- as.numeric(str_extract_all(fname, "[0-9]+")[[1]])
-    vals <- read.csv(fname) %>% pull(Production_gain)
-    data.frame(cassava = params[1], yield = params[2], 
-               land_usage = params[3], mean = mean(vals),
-               sd = sd(vals))
-}))
-
-
-fnames <- list.files("results/expansion", full.names = TRUE)
-vals_future <- do.call(rbind, lapply(fnames, function(fname){
-    params <- as.numeric(str_extract_all(fname, "[0-9]+")[[1]])
-    vals <- read.csv(fname) %>% pull(Attainable_production)
-    data.frame(cassava = params[1], yield = params[2], 
-               land_usage = params[3], mean = mean(vals),
-               sd = sd(vals))
-}))
-
-vals <- left_join(vals, vals_future, by = c("cassava", "yield", "land_usage")) %>% 
-    mutate(sum = mean.x + mean.y) %>% 
-    select(cassava, yield, land_usage, sum) %>% 
-    filter(yield != 150) %>% 
-    mutate(sum = (sum / 12572439) + 1) %>% 
-    mutate(cassava = factor(cassava),
-           land_usage = factor(land_usage),
-           yield = factor(yield))
-
-ggplot() + geom_point(data = vals %>% filter(yield == 100),
-                      aes(x = land_usage, y = sum, fill = cassava),
-                      shape = 21, size = 1.8) +
-    scale_fill_brewer(
-        "Increased planted area \nof cassava (#fold)", 
-        palette="RdPu",
-        guide = guide_legend(title.position="top", title.hjust = 0.5)) +
-    new_scale_fill() +
-    geom_point(data = vals %>% filter(cassava == 1),
-               aes(x = land_usage, y = sum, fill = yield), 
-               shape = 23, size = 1.8,
-               position = position_nudge(x = 0.2)) +
-    scale_fill_brewer(
-        "Increased attainable yield (%)",
-        palette="PuBu",
-        guide = guide_legend(title.position="top", title.hjust = 0.5)) +
-    xlab("Land usage (%)") + ylab("Multiples of current crop production") +
-    theme_classic() +
-    theme(panel.grid.major.y = element_line(
-        color = "lightgrey", linetype = "dashed"),
-        panel.border = element_blank(),
-        axis.title = element_text(size = 10, color = "black"),
-        axis.text = element_text(size = 10, color = "black"),
-        text = element_text(size = 10),
-        legend.text = element_text(size = 10),
-        legend.title = element_text(size = 10),
-        legend.margin = margin(rep(0, 4)),
-        legend.spacing.y = unit(0, 'cm'),
-        legend.spacing.x = unit(0, 'cm'),
-        legend.box.margin = margin(rep(0, 4)),
-        legend.position = "top",
-        legend.box.just = "center",
-        legend.box="vertical",
-        plot.margin = unit(rep(0, 4), "cm"))
-
-ggsave("figures/figure6_prod_potential.png",
-       bg = "white", width = 3, height = 5, dpi = 500)
 ```
 
 ## Agricultural yield

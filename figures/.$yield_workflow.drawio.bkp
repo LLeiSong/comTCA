@@ -1,12 +1,9 @@
-<mxfile host="Electron" modified="2023-11-06T21:26:22.672Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/22.0.3 Chrome/114.0.5735.289 Electron/25.8.4 Safari/537.36" etag="9hrU-EgEdmlBQKfk67Ok" version="22.0.3" type="device">
+<mxfile host="Electron" modified="2023-11-06T21:27:26.846Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/22.0.3 Chrome/114.0.5735.289 Electron/25.8.4 Safari/537.36" etag="DvyNBTNEareGhnAFH6jQ" version="22.0.3" type="device">
   <diagram name="Page-1" id="c7558073-3199-34d8-9f00-42111426c3f3">
     <mxGraphModel dx="1340" dy="840" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="826" pageHeight="1169" background="none" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="TjwTW8wrQCJNxc8yirT4-429" value="" style="ellipse;whiteSpace=wrap;html=1;aspect=fixed;" parent="1" vertex="1">
-          <mxGeometry width="10" as="geometry" />
-        </mxCell>
         <mxCell id="TjwTW8wrQCJNxc8yirT4-462" value="" style="group" parent="1" vertex="1" connectable="0">
           <mxGeometry x="91" y="122" width="676.5" height="407" as="geometry" />
         </mxCell>

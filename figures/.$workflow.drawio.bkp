@@ -1,6 +1,6 @@
-<mxfile host="Electron" modified="2024-05-30T23:40:32.789Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.4.6 Chrome/124.0.6367.207 Electron/30.0.6 Safari/537.36" etag="uz9FN_iopLaoM_2glL6h" version="24.4.6" type="device">
+<mxfile host="Electron" modified="2024-05-23T03:15:56.543Z" agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) draw.io/24.4.6 Chrome/124.0.6367.207 Electron/30.0.6 Safari/537.36" etag="bXEPnzfWwzD8J1ojE4o_" version="24.4.6" type="device">
   <diagram name="Page-1" id="c7558073-3199-34d8-9f00-42111426c3f3">
-    <mxGraphModel dx="1100" dy="840" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="826" pageHeight="1169" background="none" math="0" shadow="0">
+    <mxGraphModel dx="550" dy="420" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="826" pageHeight="1169" background="none" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -41,7 +41,7 @@
         <mxCell id="AoGGZlpT2UzDUgTT6bEP-101" value="Crop yields &amp;amp; potentials" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=13;fillColor=none;" parent="1" vertex="1">
           <mxGeometry x="198" y="230" width="100" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="AoGGZlpT2UzDUgTT6bEP-102" value="Market&amp;nbsp;&lt;div&gt;proximity&lt;/div&gt;" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=13;fillColor=none;" parent="1" vertex="1">
+        <mxCell id="AoGGZlpT2UzDUgTT6bEP-102" value="Transportation distance" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=13;fillColor=none;" parent="1" vertex="1">
           <mxGeometry x="198" y="265" width="100" height="40" as="geometry" />
         </mxCell>
         <mxCell id="AoGGZlpT2UzDUgTT6bEP-103" value="Carbon stock" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=13;fillColor=none;" parent="1" vertex="1">
@@ -306,7 +306,7 @@
         <mxCell id="AoGGZlpT2UzDUgTT6bEP-244" value="Costs/benefits" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=none;fontSize=14;align=center;fontStyle=1;fillColor=none;" parent="1" vertex="1">
           <mxGeometry x="419" y="426" width="100" height="25" as="geometry" />
         </mxCell>
-        <mxCell id="AoGGZlpT2UzDUgTT6bEP-250" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="AoGGZlpT2UzDUgTT6bEP-97" target="AoGGZlpT2UzDUgTT6bEP-243" edge="1">
+        <mxCell id="AoGGZlpT2UzDUgTT6bEP-250" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" target="AoGGZlpT2UzDUgTT6bEP-243" edge="1" source="AoGGZlpT2UzDUgTT6bEP-97">
           <mxGeometry relative="1" as="geometry">
             <mxPoint x="573" y="393" as="targetPoint" />
             <mxPoint x="328" y="380" as="sourcePoint" />

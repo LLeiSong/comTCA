@@ -163,6 +163,7 @@ Figure 2 is drawn in drawio as well.
 f_dir <- "results/scenarios/summary"
 # items <- c("Y", "I", "B", "Ca", "Co", "D", "YD", "BCaCo", "YBCaD", "YBCaCoD")
 items <- c("Y", "I", "D", "B", "Ca", "Co", "YBCaCoD")
+items_new <- c("Y", "I", "T", "B", "Ca", "Co", "Hybrid")
 
 # Load dataset
 vals_cmpr <- read.csv(file.path(f_dir, "summary_scenarios_USGs.csv")) %>% 
@@ -171,16 +172,16 @@ vals_cmpr <- read.csv(file.path(f_dir, "summary_scenarios_USGs.csv")) %>%
     filter(scenario %in% items) %>% 
     # Replace YBCaCoD to a simple name
     mutate(scenario = ifelse(scenario == "YBCaCoD", "Hybrid", scenario)) %>% 
+    mutate(scenario = ifelse(scenario == "D", "T", scenario)) %>% 
     mutate(scenario = factor(
-        scenario, levels = c(items[-7], "Hybrid"), 
-        labels = c(items[-7], "Hybrid"))) %>% 
+        scenario, levels = items_new, labels = items_new)) %>% 
     mutate(farmable_area_intense = farmable_area / num_unit) %>% 
     select(-c(land_usage, change, num_unit, weight))
-names(vals_cmpr) <- c("B", "Ca", "Co", "D", "Y", "scenario", "I")
+names(vals_cmpr) <- c("B", "Ca", "Co", "T", "Y", "scenario", "I")
 
 # Figure
-items <- c("Y", "I", "D", "B", "Ca", "Co", "Hybrid")
-fig_list <- lapply(c("Y", "I", "D", "B", "Ca", "Co"), function(item){
+items <- c("Y", "I", "T", "B", "Ca", "Co", "Hybrid")
+fig_list <- lapply(c("Y", "I", "T", "B", "Ca", "Co"), function(item){
     # Clean data
     # item_order <- c(item, setdiff(items, item))
     item_order <- rev(items)
@@ -193,7 +194,7 @@ fig_list <- lapply(c("Y", "I", "D", "B", "Ca", "Co"), function(item){
     vals <- vals %>% 
         mutate(group = ifelse(
             scenario == item_mod, "Optimal", 
-            ifelse(scenario %in% setdiff(c("B", "Ca", "Co", "D", "Y"), item_mod), 
+            ifelse(scenario %in% setdiff(c("B", "Ca", "Co", "T", "Y"), item_mod), 
                    "Single factor", "Multiple factor"))) %>% 
         mutate(group = factor(
             group, levels = c("Single factor", "Optimal", "Multiple factor"),
@@ -215,7 +216,7 @@ fig_list <- lapply(c("Y", "I", "D", "B", "Ca", "Co"), function(item){
     } else if (str_detect(item, "Co")){
         vals$value <- vals$value / 1e6
         xlab_nm <- expression(paste("Connectivity loss (", 10^5, ")"))
-    } else if (str_detect(item, "D")){
+    } else if (str_detect(item, "T")){
         vals$value <- vals$value / 60 / 1e6
         xlab_nm <- expression(paste("Travel time (hours * ", 10^6, ")"))}
 
@@ -280,15 +281,18 @@ pgi_sd <- sd(prod_gain_intense$Production_gain) / 1e6
 # Read trajectories
 f_dir <- "results/trajectories"
 items <- c("Y", "B", "Ca", "Co", "D", "YBCaCoD")
+items_new <- c("Y", "T", "B", "Ca", "Co", "Hybrid")
 simus <- do.call(rbind, lapply(items, function(item){
+    item_new <- ifelse(item == "D", "T", 
+                       ifelse(item == "YBCaCoD", "Hybrid", item))
     read.csv(sprintf("%s/%s_trajectory.csv", f_dir, item)) %>% 
-        select(c('production', 'Biodiversity', "Carbon", "Connectivity", 
-                 "Distance", "farmable_area")) %>% 
+        select(c('production', "Distance", 'Biodiversity', "Carbon", "Connectivity", 
+                 "farmable_area")) %>% 
         rbind(data.frame(
             production = 0, Biodiversity = 0, Carbon = 0,
             Connectivity = 0, Distance = 0, farmable_area = 0), .) %>% 
-        mutate(mod = item)
-})) %>% mutate(mod = factor(mod, levels = items, labels = items))
+        mutate(mod = item_new)
+})) %>% mutate(mod = factor(mod, levels = items_new, labels = items_new))
 
 fig_list <- lapply(names(simus)[1:5], function(ele){
     vals <- simus %>% select(all_of(c("farmable_area", "mod", ele)))
@@ -435,7 +439,7 @@ g1 <- ggplot() +
           legend.box = "vertical")
 
 # Pairwise agreement
-items <- c("Y", "B", "Ca", "Co", "D", "YBCaCoD")
+items <- c("Y", "D", "B", "Ca", "Co", "YBCaCoD")
 nms <- sapply(str_split(basename(fnames), "_"), function(x) x[[1]][1])
 names(maps) <- nms
 pairwise_agree <- do.call(rbind, lapply(1:(length(items) - 1), function(n){
@@ -453,7 +457,12 @@ pairwise_agree <- do.call(rbind, lapply(1:(length(items) - 1), function(n){
 })); row.names(pairwise_agree) <- NULL
 
 ## Figure
+items <- c("Y", "T", "B", "Ca", "Co", "Hybrid")
 vals <- pairwise_agree %>% filter(crop == "Overall") %>%
+    mutate(from = ifelse(
+        from == "D", "T", ifelse(from == "YBCaCoD", "Hybrid", from))) %>% 
+    mutate(to = ifelse(
+        to == "D", "T", ifelse(to == "YBCaCoD", "Hybrid",  to))) %>% 
     mutate(from = factor(from, levels = items, labels = items),
            to = factor(to, levels = items, labels = items))
 
@@ -486,7 +495,9 @@ g2 <- ggplot(vals, aes(x = from, y = to, fill = agreement)) +
         barwidth = 7, barheight = 0.8,
         title.position = "top", title.hjust = 0.5))
 
-ggarrange(g1, g2, nrow = 1, ncol = 2, labels = c("A", "B"), widths = c(1.2, 1))
+ggarrange(g1, g2, nrow = 1, ncol = 2, labels = c("A", "B"), 
+          hjust = -0.5, vjust = 2, 
+          widths = c(1.2, 1))
 
 ggsave("figures/figure4_newland_agreement.png",
        bg = "white",
@@ -569,10 +580,15 @@ ggsave("figures/S13_agreement_crops.png",
 ### Figure S14
 
 ```{r}
-items <- c("Y", "B", "Ca", "Co", "D", "YBCaCoD")
+items <- c("Y", "D", "B", "Ca", "Co", "YBCaCoD")
 fig_list <- lapply(c("Maize", "Paddy", "Sorghum", "Cassava", "Beans"), 
                    function(crp){
+    items <- c("Y", "T", "B", "Ca", "Co", "Hybrid")
     vals <- pairwise_agree %>% filter(crop == crp) %>%
+        mutate(from = ifelse(
+            from == "D", "T", ifelse(from == "YBCaCoD", "Hybrid", from))) %>% 
+        mutate(to = ifelse(
+            to == "D", "T", ifelse(to == "YBCaCoD", "Hybrid",  to))) %>% 
         mutate(from = factor(from, levels = items, labels = items),
                to = factor(to, levels = items, labels = items))
     
@@ -594,12 +610,12 @@ fig_list <- lapply(c("Maize", "Paddy", "Sorghum", "Cassava", "Beans"),
               legend.direction = "horizontal",
               legend.spacing.y = unit(0.1, 'cm'),
               legend.margin = margin(rep(0, 4)), 
-              text = element_text(size = 9, color = "black"),
-              legend.text = element_text(size = 9),
-              legend.title = element_text(size = 9),
+              text = element_text(size = 10, color = "black"),
+              legend.text = element_text(size = 10, color = "black"),
+              legend.title = element_text(size = 10, color = "black"),
               axis.text.x = element_text(angle = 45, vjust = 1, 
-                                         size = 9, hjust = 1),
-              axis.text.y = element_text(size = 9))+
+                                         size = 10, color = "black", hjust = 1),
+              axis.text.y = element_text(size = 10, color = "black"))+
         guides(fill = guide_colorbar(
             barwidth = 4, barheight = 0.5,
             title.position = "top", title.hjust = 0.5))
@@ -661,10 +677,20 @@ vals <- do.call(rbind, lapply(c("B", "D", "Ca", "Co"), function(fct){
 
 vals <- vals %>% 
     mutate(group = factor(group, 
-                          levels = c("B", "D", "Ca", "Co"),
+                          levels = c("D", "B", "Ca", "Co"),
                           labels = c("Travel time", "Biodiversity", 
                                      "Carbon", "Connectivity"))) %>% 
     mutate(weight = weight * 100)
+
+# Get some numbers
+vals_to_check <- lapply(unique(vals$group), function(grp){
+    vals %>% filter(type == "line") %>% 
+        filter(group == grp) %>% 
+        arrange(weight) %>% 
+        mutate(value_ds = c(0, .$value[1:(nrow(.) - 1)] - .$value[2:nrow(.)]),
+               farmable_area_ds = c(0, .$farmable_area[2:nrow(.)] -
+                                        .$farmable_area[1:(nrow(.) - 1)]))
+}) %>% bind_rows()
 
 # Make figures
 g1 <- ggplot() +
@@ -677,7 +703,9 @@ g1 <- ggplot() +
               aes(x = weight, y = farmable_area, color = group, size = size)) +
     scale_size_manual(values = c(0.6, 1.0, 1.4, 1.8), guide = "none") + 
     xlab("Weight (%)") + ylab("New cropland area (% of solution Y)       ") +
-    scale_color_npg(name = "Decision-making factor") +
+    scale_color_manual(name = "Decision-making factor",
+                       values = c("#E64B35FF", "#00A087FF", 
+                                  "#3C5488FF", "#7E6148FF")) +
     theme_light() +
     theme(panel.grid.major.y = element_blank(),
           panel.border = element_blank(),
@@ -704,7 +732,9 @@ g2 <- ggplot() +
     geom_point(data = vals %>% filter(type == "point"), 
               aes(x = weight, y = value, color = group)) +
     xlab("Weight (%)") + ylab("Cost (% of solution Y)") +
-    scale_color_npg(name = "Decision-making factor") +
+    scale_color_manual(name = "Decision-making factor",
+                       values = c("#E64B35FF", "#00A087FF", 
+                                  "#3C5488FF", "#7E6148FF")) +
     theme_light() +
     theme(panel.grid.major.y = element_blank(),
           panel.border = element_blank(),
@@ -754,16 +784,16 @@ vals <- do.call(rbind, lapply(unique(vals$group), function(fct){
 })) %>% mutate(weight = weight * 100)
 
 # Make figures
+nms <- c("B", "D", "Ca", "Co")
 fig_list <- lapply(nms, function(fct){
     val_to_plot <- vals %>% filter(group == fct) %>% 
         pivot_longer(nms, names_to = "factor", values_to = "value")
     
     val_to_plot <- val_to_plot %>% 
         mutate(factor = factor(factor, 
-                              levels = c("B", "Ca", "Co", "D"),
-                              labels = c("Biodiversity", "Carbon", 
-                                         "Connectivity", 
-                                         "Travel time")))
+                              levels = c("B", "D", "Ca", "Co"),
+                              labels = c("Biodiversity", "Travel time", 
+                                         "Carbon", "Connectivity")))
     ggplot(data = val_to_plot) +
         geom_line(aes(x = weight, y = value, color = factor),
                   linewidth = 0.8) +
@@ -1018,7 +1048,7 @@ legend <- ggplot() +
                       guide = guide_legend(
                           theme = theme(
                               legend.title = element_text(
-                                  color = "#31B7BCFF", 
+                                  color = "#00A087FF", 
                                   face = "bold.italic", 
                                   hjust = -10, vjust = -23),
                               legend.title.position = "top",
@@ -1032,7 +1062,7 @@ legend <- ggplot() +
                       labels = c("64%", "80%"),
                       guide = guide_legend(
                           theme = theme(
-                              legend.text = element_text(color = "#31B7BCFF", 
+                              legend.text = element_text(color = "#00A087FF", 
                                                          face = "italic"),
                               legend.title = element_text(color = "NA")),
                           title.position = "top", 
@@ -1060,7 +1090,7 @@ legend_lc <- get_legend(legend)
 
 g1 <- ggarrange(legend_lc, ggarrange(plotlist = fig_list, nrow = 1, ncol = 3,
                                      labels = c("A", "B", "C"),
-                                     hjust = -1.5, vjust = 2), 
+                                     hjust = -1.2, vjust = 2), 
                 nrow = 2, ncol = 1, heights = c(5, 10))
 
 # New area and ecological costs change
@@ -1110,8 +1140,8 @@ g2 <- ggplot(data = vals) +
           axis.title = element_text(color = "black", size = 10),
           axis.text = element_text(color = "black", size = 10),
           axis.text.x = element_text(face = "bold"),
-          legend.text = element_text(size = 10, color = "#31B7BCFF", face = "italic"),
-          legend.title = element_text(size = 10, color = "#31B7BCFF", face = "bold.italic"),
+          legend.text = element_text(size = 10, color = "#00A087FF", face = "italic"),
+          legend.title = element_text(size = 10, color = "#00A087FF", face = "bold.italic"),
           legend.position = "top",
           legend.margin = margin(rep(0, 4)),
           legend.box.margin = margin(c(2, 0, -10, 0)),

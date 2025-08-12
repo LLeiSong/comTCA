@@ -174,6 +174,6 @@ fig_yield_qrf <- function(crp){
 fig_list <- lapply(crops, fig_yield_qrf)
 ggarrange(
     plotlist = fig_list,
-    labels = c("A", "B", "C", "D", "E"),
+    labels = letters[1:5],
     ncol = 3, nrow = 2, common.legend = TRUE, legend = "bottom")
 ggsave("figures/S2_eval_yield_downscale.png", width = 8, height = 6, bg = "white")

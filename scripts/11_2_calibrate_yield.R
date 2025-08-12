@@ -306,7 +306,9 @@ yield_compare <- do.call(rbind, lapply(unique(regions$Region), function(rg){
         data.frame() %>% mutate(Crop = row.names(.)) %>% 
         rename(Calibrated_Yield = mean) %>% mutate(Region = rg) %>% 
         inner_join(real_yield, by = c('Region', 'Crop'))
-})) %>% mutate(Crop = factor(Crop, levels = crops, labels = LETTERS[1:length(crops)])) %>% 
+})) %>% mutate(
+    Crop = factor(Crop, levels = crops, 
+                  labels = letters[1:length(crops)])) %>% 
     filter(!is.na(Yield))
 
 # Plot
